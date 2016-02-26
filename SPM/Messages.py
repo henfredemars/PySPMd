@@ -42,7 +42,7 @@ class MessageStrategy:
       if self.arg_count+2 != len(msg):
         raise BadMessageError("Bad Message Format")
       hmac = msg[-1]
-      if hmac != hmacf(msg[:-1]):
+      if hmac != hmacf(" ".join(msg[:-1])):
         raise BadMessageError("HMAC Failure")
     else:
       if self.arg_count+1 != len(msg):
@@ -78,6 +78,7 @@ MakeLink			= MessageStrategy("MAKE_LINK",1,["Subject1","Subject2"],True)
 DeleteFileStrategy		= MessageStrategy("DELETE_FILE",1,["File Name"],True)
 ClearFilters			= MessageStrategy("CLEAR_FILTERS",1,["Subject"],True)
 ClearLinks			= MessageStrategy("CLEAR_LINKS",1,["Subject"],True)
+DeleteSubject			= MessageStrategy("DELETE_SUBJECT",1,["Subject"],True)
 
 strategies = MessageStrategy.strategies
 
@@ -90,5 +91,5 @@ strategies = MessageStrategy.strategies
 #Built messages are padded at the end with spaces, leading and trailing spaces must be ignored
 #  by the client and the server. This hides the length of control messages
 #Passwords are stored on the server for each client as the shared secret for key generation
-#Direction of links and filters does matter
+#Neither links nor filters are bidirectional
 #Super subjects exist that can create and destroy links and filters
