@@ -1,7 +1,7 @@
 from .. import log, __version__, _max_msg_size
 
 from collections import namedtuple
-from time import time
+from time import time_sec
 import inspect
 
 from Messages.MessageStrategies import strategies
@@ -20,6 +20,7 @@ ClientData = namedtuple("ClientData",[
 
 #Utility functions (for code readability), time units are in ms
 log_this_func = lambda: log(inspect.stack()[1][3])
+time = lambda: time_sec()*1000
 
 #Set first lastreadtime to a resonable value
 def init_lastreadtime(scope):
