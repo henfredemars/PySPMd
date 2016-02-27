@@ -35,7 +35,6 @@ class MessageStrategy:
     return msg
 
   def parse(self,msg,hmacf=None):
-    msg = msg.strip().split()
     assert msg[0]==self.command
     if self.use_hmac:
       assert hmacf
