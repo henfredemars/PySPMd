@@ -21,10 +21,22 @@ ClientData = namedtuple("ClientData",[
 #Utility functions (for code readability), time units are in ms
 log_this_func = lambda: log(inspect.stack()[1][3])
 
+#Set first lastreadtime to a resonable value
 def init_lastreadtime(scope):
   if scope.lastreadtime is None:
     scope.lastreadtime = time()
 
+#Measure time we last tried to read from the socket and block if no data to keep the time
+#  for an event to pass through the queue near target_depth ms. If the server starts
+#  getting busy, we quickly back off. Ultimately the server becomes non-blocking when
+#  the queue is busy. When idle, the server slowly increments the socket block time until
+#  the queue is once again target_depth ms long, spending most of its time blocked on
+#  the socket, waiting for data
+#
+#This is done to avoid spinning on the non-blocking socket when there is nothing to do but
+#  check for incoming data (in this case we will soon block a long time), while not blocking
+#  when the server is fully loaded (in this case we quickly handle the check socket event
+#  to move on with more pressing matters...)
 def update_blocktime(scope):
   init_lastreadtime(scope)
   ct = time()
@@ -46,7 +58,7 @@ def scan_for_message_and_divide_if_finished(scope):
 class Events:
 
   def __init__(self,dq):
-    self.dq = dq
+    self.dq = dq #Event queue
 
   def acceptClient(self,socket):
     log_this_func()
