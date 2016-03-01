@@ -25,7 +25,6 @@ class Server():
     while True:
       try:
         self.dq.popleft()()
-        print("Dispatch...")
       except IndexError:
         sleep(self.idlepoll/1000)
 
