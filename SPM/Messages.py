@@ -1,6 +1,6 @@
-from Util import log
+from SPM.Util import log
 
-from .. import _min_msg_size
+from . import _min_msg_size
 
 #Messages
 
@@ -26,13 +26,13 @@ class MessageStrategy:
       assert hmacf
     else:
       hmacf = lambda x: ""
-    msg = ("{} ".format(self.command) + " ".join(*args)).strip()
+    msg = ("{} ".format(self.command) + " ".join(map(repr,args))).strip()
     msg += " " + hmacf(msg)
     msg = msg.strip() + "\n"
     log(msg)
     if len(msg) < _min_msg_size:
       msg += (512-len(msg)) * "_"
-    return msg
+    return msg.encode(encoding="UTF-8")
 
   def parse(self,msg,hmacf=None):
     assert msg[0]==self.command

@@ -1,6 +1,6 @@
 #Assorted utilities
 
-from .. import _debug, _debug_width
+from . import _debug, _debug_width
 
 def log(msg):
   if not _debug:

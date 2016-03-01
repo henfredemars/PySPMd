@@ -2,11 +2,11 @@ import sqlite3
 import shutil
 import os
 
-from Tickets import Ticket
-from Subject import Subject
-from Link import Link
-from Filter import Filter
-from Right import Right
+from SPM.Tickets import Ticket
+from SPM.Subject import Subject
+from SPM.Link import Link
+from SPM.Filter import Filter
+from SPM.Right import Right
 
 #Database
 #
