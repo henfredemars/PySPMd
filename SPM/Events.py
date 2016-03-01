@@ -2,6 +2,7 @@ from . import __version__, _max_msg_size
 from SPM.Util import log
 
 from time import time as time_sec
+from time import sleep
 import inspect
 import socket
 
@@ -46,7 +47,6 @@ def update_blocktime(scope):
   ct = time()
   scope.blocktime = next_block_time(scope.blocktime,ct-scope.lastreadtime)
   scope.lastreadtime = ct
-  scope.socket.settimeout(scope.blocktime/1000)
 
 def next_block_time(last_time,call_delta,target_depth=700,precision=10):
   if call_delta > target_depth:
@@ -88,6 +88,7 @@ class Events:
     update_blocktime(scope)
     try:
       scope.buf.extend(bytearray(scope.socket.recv(4096)))
+      sleep(scope.blocktime/1000)
     except socket.timeout:
       pass
     if len(scope.buf) > _max_msg_size:
