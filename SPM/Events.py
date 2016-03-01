@@ -1,22 +1,25 @@
-from .. import log, __version__, _max_msg_size
+from . import __version__, _max_msg_size
+from SPM.Util import log
 
-from collections import namedtuple
-from time import time_sec
+from time import time as time_sec
 import inspect
+import socket
 
-from Messages.MessageStrategies import strategies
+from SPM.Messages import MessageStrategy
+
+strategies = MessageStrategy.strategies
 
 #Events and shared event data
 
-ClientData = namedtuple("ClientData",[
-	"socket",
-	"msg",
-	"buf",
-	"subject",      #authenticated
-	"stream",       #stream cipher object
-	"lastreadtime"  #system time in ms since last call to read part
-	"blocktime",    #time to spend blocked while reading message part
-	])
+class ClientData:
+  def __init__(self,socket):
+    self.socket = socket
+    self.msg = None
+    self.buf = bytearray()
+    self.subject = None
+    self.stream = None
+    self.lastreadtime = None
+    self.blocktime = 0
 
 #Utility functions (for code readability), time units are in ms
 log_this_func = lambda: log(inspect.stack()[1][3])
@@ -43,7 +46,7 @@ def update_blocktime(scope):
   ct = time()
   scope.blocktime = next_block_time(scope.blocktime,ct-scope.lastreadtime)
   scope.lastreadtime = ct
-  scope.socket.settimeout(scope.blocktime)
+  scope.socket.settimeout(scope.blocktime/1000)
 
 def next_block_time(last_time,call_delta,target_depth=700,precision=10):
   if call_delta > target_depth:
@@ -51,63 +54,82 @@ def next_block_time(last_time,call_delta,target_depth=700,precision=10):
   return last_time+precision
 
 def scan_for_message_and_divide_if_finished(scope):
-  if "\n" in scope.buf:
-    split_buf = scope.buf.split("\n")
-    scope.msg = split_buf[0].strip()
-    scope.buf = ''.join(split_buf[1:])
+  if b"\n" in scope.buf:
+    split_buf = scope.buf.split(b"\n")
+    scope.msg = split_buf[0].strip().decode(encoding="UTF-8",errors="ignore")
+    scope.buf = b''.join(split_buf[1:])
 
 class Events:
 
-  def __init__(self,dq):
-    self.dq = dq #Event queue
-
-  def acceptClient(self,socket):
+  @staticmethod
+  def acceptClient(dq,socket):
     log_this_func()
     addr = socket.getpeername()
     print("Accepted connection from %s:%i" % addr)
-    scope = ClientData(socket,None,[],None,None,None,0)
-    self.dq.append(lambda: Events.readUntilMessageEnd(self,scope,
-	lambda: Events.checkHelloAndReply(self,scope)))
+    scope = ClientData(socket)
+    dq.append(lambda: Events.readUntilMessageEnd(dq,scope,
+	lambda: Events.checkHelloAndReply(dq,scope)))
 
-  def readUntilMessageEnd(self,scope,next):
+  @staticmethod
+  def readUntilMessageEnd(dq,scope,next):
     log_this_func()
     if scope.buf:
       scan_for_message_and_divide_if_finished(scope)
     if scope.msg:
-     log("Got full message")
-     self.dq.append(lambda: next())
+      log("Got full message")
+      dq.append(lambda: next())
     else:
-      self.dq.append(lambda: Events.readMessagePart(self,scope,
-	lambda: Events.readUntilMessageEnd(self,scope,next)))
+      dq.append(lambda: Events.readMessagePart(dq,scope,
+	lambda: Events.readUntilMessageEnd(dq,scope,next)))
 
-  def readMessagePart(self,scope,next):
+  @staticmethod
+  def readMessagePart(dq,scope,next):
     log_this_func()
     update_blocktime(scope)
-    scope.buf.append(scope.socket.recv(4096))
+    try:
+      scope.buf.extend(bytearray(scope.socket.recv(4096)))
+    except socket.timeout:
+      pass
     if len(scope.buf) > _max_msg_size:
-      self.dq.append(lambda: Events.replyErrorMessage(self,"Message too large.",scope,lambda: Events.die(self,scope)))
+      dq.append(lambda: Events.replyErrorMessage(dq,"Message too large.",scope,lambda: Events.die(dq,scope)))
     else:
-      self.dq.append(lambda: next())
+      dq.append(lambda: next())
 
-  def checkHelloAndReply(self,scope):
+  @staticmethod
+  def checkHelloAndReply(dq,scope):
     log_this_func()
     assert(scope.msg)
     msg = scope.msg.split()
     if not msg[0] in strategies or not msg[0]=="HELLO_CLIENT":
-      self.dq.append(lambda: Events.replyErrorMessage(self,"Unknown message type.",scope,lambda: Events.die(self,scope)))
+      dq.append(lambda: Events.replyErrorMessage(dq,"Unknown message type.",scope,lambda: Events.die(dq,scope)))
       return
     args_dict = strategies[msg[0]].parse(msg)
     log("Client reported version: %s" % args_dict["Version"])
     if str(__version__) != args_dict["Version"]:
-      self.dq.append(lambda: Events.replyErrorMessage(self,"Version mismatch.",scope,lambda: Events.die(self,scope)))
+      dq.append(lambda: Events.replyErrorMessage(dq,"Version mismatch.",scope,lambda: Events.die(dq,scope)))
       return
-    self.dq.append(lambda: Events.waitForNextMessage(self,scope))
+    scope.socket.sendall(strategies["HELLO_SERVER"].build([__version__]))
+    dq.append(lambda: Events.waitForNextMessage(dq,scope))
     scope.buf = []
     scope.msg = None
 
-  def waitForNextMessage(self,scope):
+  @staticmethod
+  def waitForNextMessage(dq,scope):
     while "\n" in scope.buf:
       scan_for_message_and_divide_if_finished(scope)
       #TODO switch on all possible messages
-    self.dq.append(lambda: Events.readUntilMessageEnd(self,scope,
-	lambda: Events.waitForNextMessage(self,scope)))
+    dq.append(lambda: Events.readUntilMessageEnd(dq,scope,
+	lambda: Events.waitForNextMessage(dq,scope)))
+
+  @staticmethod
+  def replyErrorMessage(dq,message,scope,next):
+    log_this_func()
+    scope.socket.sendall(message.encode(encoding="UTF-8"))
+    dq.append(lambda: next())
+
+  @staticmethod
+  def die(dq,scope):
+    log_this_func()
+    scope.socket.sendall(strategies["DIE"].build())
+    scope.socket.close()
+    
