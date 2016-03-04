@@ -92,7 +92,8 @@ class Events:
     except socket.timeout:
       pass
     if len(scope.buf) > _max_msg_size:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Message too large.",scope,lambda: Events.die(dq,scope)))
+      dq.append(lambda: Events.replyErrorMessage(dq,"Message too large.",scope,
+                                                 lambda: Events.die(dq,scope)))
     else:
       dq.append(lambda: next())
 
@@ -102,12 +103,14 @@ class Events:
     assert(scope.msg)
     msg = scope.msg.split()
     if not msg[0] in strategies or not msg[0]=="HELLO_CLIENT":
-      dq.append(lambda: Events.replyErrorMessage(dq,"Unknown message type.",scope,lambda: Events.die(dq,scope)))
+      dq.append(lambda: Events.replyErrorMessage(dq,"Unknown message type.",scope,
+                                                 lambda: Events.die(dq,scope)))
       return
     args_dict = strategies[msg[0]].parse(msg)
     log("Client reported version: %s" % args_dict["Version"])
     if str(__version__) != args_dict["Version"]:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Version mismatch.",scope,lambda: Events.die(dq,scope)))
+      dq.append(lambda: Events.replyErrorMessage(dq,"Version mismatch.",scope,
+                                                 lambda: Events.die(dq,scope)))
       return
     scope.socket.sendall(strategies["HELLO_SERVER"].build([__version__]))
     dq.append(lambda: Events.waitForNextMessage(dq,scope))
