@@ -1,6 +1,12 @@
 from enum import Enum
+from SPM.Util import log
 
 #Tickets and Rights(Enum)
+
+class BadTicketError(RuntimeError):
+  def __init__(self,msg):
+    super().__init__(msg)
+    log("BadTicketError: " + msg)
 
 class Right(Enum):
   t = 1
@@ -14,9 +20,10 @@ class Ticket:
     if isinstance(right,Right):
       self.right = right
     else:
-      assert len(right) == 3
-      assert right[0:2] == "T/"
-      self.right = Right[right[2]]
+      if len(right) == 3 and right[0:2] == "T/":
+        self.right = Right[right[2]]
+      else:
+        raise BadTicketError("Bad ticket format.")
       
   def adapt_ticket(self):
     return repr(self)

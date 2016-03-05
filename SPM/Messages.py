@@ -1,3 +1,6 @@
+
+from hmac import compare_digest
+
 from SPM.Util import log
 
 from . import _min_msg_size
@@ -6,16 +9,16 @@ from . import _min_msg_size
 
 class BadMessageError(RuntimeError):
   def __init__(self,message):
-    super().message = message
+    super().__init__(message)
     log("BadMessageError: " + message)
 
 class MessageStrategy:
 
   strategies = dict()
 
-  def __init__(self,command,arg_count,parms_info,use_hmac):
+  def __init__(self,command,parms_info,use_hmac):
     self.command = command.upper()
-    self.arg_count = int(arg_count)
+    self.arg_count = len(parms_info)
     self.parms_info = parms_info
     self.use_hmac = bool(use_hmac)
     MessageStrategy.strategies[self.command] = self
@@ -31,7 +34,7 @@ class MessageStrategy:
     msg = msg.strip() + "\n"
     log(msg)
     if len(msg) < _min_msg_size:
-      msg += (512-len(msg)) * "_"
+      msg += (512-len(msg)) * " "
     return msg.encode(encoding="UTF-8")
 
   def parse(self,msg,hmacf=None):
@@ -41,7 +44,7 @@ class MessageStrategy:
       if self.arg_count+2 != len(msg):
         raise BadMessageError("Bad Message Format")
       hmac = msg[-1]
-      if hmac != hmacf(" ".join(msg[:-1])):
+      if not compare_digest(hmac,hmacf(" ".join(msg[:-1]))):
         raise BadMessageError("HMAC Failure")
     else:
       if self.arg_count+1 != len(msg):
@@ -56,28 +59,28 @@ class MessageStrategy:
     str(self.__class__) + ": " + str(self.__dict__)
 
 
-HelloServerStrategy		= MessageStrategy("HELLO_SERVER",1,["Version"],False)
-HelloClientStrategy		= MessageStrategy("HELLO_CLIENT",1,["Version"],False)
-DieStrategy			= MessageStrategy("DIE",0,None,False)
-PullFileStrategy		= MessageStrategy("PULL_FILE",1,["File Name"],True)
-PushFileStrategy		= MessageStrategy("PUSH_FILE",2,["File Name","Data","CurPart","EndPart"],True)
-ErrorServerStrategy		= MessageStrategy("ERROR_SERVER",1,["Error Message"],True)
-AuthSubjectStrategy		= MessageStrategy("AUTH_SUBJECT",3,["Subject","Key","Salt"],False)
-ListSubjectsClientStrategy	= MessageStrategy("LIST_SUBJECT_CLIENT",1,None,True)
-ListSubjectsServerStrategy	= MessageStrategy("LIST_SUBJECT_SERVER",1,["Subjects"],True)
-ListObjectsClientStrategy	= MessageStrategy("LIST_OBJECT_CLIENT",1,None,True)
-ListObjectsServerStrategy	= MessageStrategy("LIST_OBJECT_SERVER",1,["Objects"],True)
-GiveTicketSubject		= MessageStrategy("GIVE_TICKET_SUBJECT",1,["Ticket"],True)
-TakeTicketSubject		= MessageStrategy("TAKE_TICKET_SUBJECT",1,["Ticket"],True)
-MakeDirectory			= MessageStrategy("MAKE_DIRECTORY",1,["Directory"],True)
-MakeSubject			= MessageStrategy("MAKE_SUBJECT",1,["Subject"],True)
-ChangeDirStrategy		= MessageStrategy("CD",1,["Local Path Name"],True)
-MakeFilter			= MessageStrategy("MAKE_FILTER",1,["Subject1","Subject2","Ticket"],True)
-MakeLink			= MessageStrategy("MAKE_LINK",1,["Subject1","Subject2"],True)
-DeleteFileStrategy		= MessageStrategy("DELETE_FILE",1,["File Name"],True)
-ClearFilters			= MessageStrategy("CLEAR_FILTERS",1,["Subject"],True)
-ClearLinks			= MessageStrategy("CLEAR_LINKS",1,["Subject"],True)
-DeleteSubject			= MessageStrategy("DELETE_SUBJECT",1,["Subject"],True)
+HelloServerStrategy		= MessageStrategy("HELLO_SERVER",["Version"],False)
+HelloClientStrategy		= MessageStrategy("HELLO_CLIENT",["Version"],False)
+DieStrategy			= MessageStrategy("DIE",None,False)
+PullFileStrategy		= MessageStrategy("PULL_FILE",["File Name"],True)
+PushFileStrategy		= MessageStrategy("PUSH_FILE",["File Name","Data","CurPart","EndPart"],True)
+ErrorServerStrategy		= MessageStrategy("ERROR_SERVER",["Error Message"],False)
+AuthSubjectStrategy		= MessageStrategy("AUTH_SUBJECT",["Subject","Salt"],False)
+ListSubjectsClientStrategy	= MessageStrategy("LIST_SUBJECT_CLIENT",None,True)
+ListSubjectsServerStrategy	= MessageStrategy("LIST_SUBJECT_SERVER",["Subjects"],True)
+ListObjectsClientStrategy	= MessageStrategy("LIST_OBJECT_CLIENT",None,True)
+ListObjectsServerStrategy	= MessageStrategy("LIST_OBJECT_SERVER",["Objects"],True)
+GiveTicketSubject		= MessageStrategy("GIVE_TICKET_SUBJECT",["Subject","Ticket"],True)
+TakeTicketSubject		= MessageStrategy("TAKE_TICKET_SUBJECT",["Subject","Ticket"],True)
+MakeDirectory			= MessageStrategy("MAKE_DIRECTORY",["Directory"],True)
+MakeSubject			= MessageStrategy("MAKE_SUBJECT",["Subject","Password"],True)
+ChangeDirStrategy		= MessageStrategy("CD",["Path"],True)
+MakeFilter			= MessageStrategy("MAKE_FILTER",["Subject1","Subject2","Ticket"],True)
+MakeLink			= MessageStrategy("MAKE_LINK",["Subject1","Subject2"],True)
+DeleteFileStrategy		= MessageStrategy("DELETE_FILE",["File Name"],True)
+ClearFilters			= MessageStrategy("CLEAR_FILTERS",["Subject"],True)
+ClearLinks			= MessageStrategy("CLEAR_LINKS",["Subject"],True)
+DeleteSubject			= MessageStrategy("DELETE_SUBJECT",["Subject"],True)
 
 strategies = MessageStrategy.strategies
 
