@@ -7,20 +7,35 @@ import inspect
 import socket
 
 from SPM.Messages import MessageStrategy
+from SPM.Messages import BadMessageError
+from SPM.Database import Database
+from SPM.Ticket import Ticket
 
 strategies = MessageStrategy.strategies
+db = Database()
 
 #Events and shared event data
 
 class ClientData:
   def __init__(self,socket):
-    self.socket = socket
-    self.msg = None
-    self.buf = bytearray()
-    self.subject = None
-    self.stream = None
-    self.lastreadtime = None
-    self.blocktime = 0
+    self.socket = socket          #Client communication socket
+    self.msg = None               #Client msg waiting for event dispatch
+    self.buf = bytearray()        #Recv buffer for client messages
+    self.subject = None           #Authenticated subject under which client acts
+    self.subject1 = None          #Multi-subject
+    self.subject2 = None          #Multi-subject
+    self.target = None            #Single subject argument
+    self.t_password = None        #Target subject's password
+    self.ticket = None            #Ticket
+    self.salt = None              #Salt
+    self.stream = None            #Keystream generator object
+    self.lastreadtime = None      #Last attempt to read from socket
+    self.blocktime = 0            #Time to sleep after reading empty socket
+    self.filename = None          #File name
+    self.data = None              #Base64-encoded file data block
+    self.curpart = 0              #Xfer progress
+    self.endpart = 0              #Xfer EOF detection
+    self.cd = ""                  #Client virtual working directory
 
 #Utility functions (for code readability), time units are in ms
 log_this_func = lambda: log(inspect.stack()[1][3])
@@ -59,6 +74,7 @@ def scan_for_message_and_divide_if_finished(scope):
     scope.msg = split_buf[0].strip().decode(encoding="UTF-8",errors="ignore")
     scope.buf = b''.join(split_buf[1:])
 
+
 class Events:
 
   @staticmethod
@@ -72,7 +88,6 @@ class Events:
 
   @staticmethod
   def readUntilMessageEnd(dq,scope,next):
-    log_this_func()
     if scope.buf:
       scan_for_message_and_divide_if_finished(scope)
     if scope.msg:
@@ -84,7 +99,6 @@ class Events:
 
   @staticmethod
   def readMessagePart(dq,scope,next):
-    log_this_func()
     update_blocktime(scope)
     try:
       scope.buf.extend(bytearray(scope.socket.recv(4096)))
@@ -102,8 +116,8 @@ class Events:
     log_this_func()
     assert(scope.msg)
     msg = scope.msg.split()
-    if not msg[0] in strategies or not msg[0]=="HELLO_CLIENT":
-      dq.append(lambda: Events.replyErrorMessage(dq,"Unknown message type.",scope,
+    if not msg[0]=="HELLO_CLIENT":
+      dq.append(lambda: Events.replyErrorMessage(dq,"Unexpected message type.",scope,
                                                  lambda: Events.die(dq,scope)))
       return
     args_dict = strategies[msg[0]].parse(msg)
@@ -114,14 +128,103 @@ class Events:
       return
     scope.socket.sendall(strategies["HELLO_SERVER"].build([__version__]))
     dq.append(lambda: Events.waitForNextMessage(dq,scope))
-    scope.buf = []
+    scope.buf = bytearray()
     scope.msg = None
 
   @staticmethod
   def waitForNextMessage(dq,scope):
-    while "\n" in scope.buf:
+    log_this_func()
+    while b"\n" in scope.buf:
       scan_for_message_and_divide_if_finished(scope)
-      #TODO switch on all possible messages
+      #Switch on all possible messages
+      msg_type = scope.msg.split()[0]
+      try:
+        args_dict = strategies[msg[0]].parse(msg)
+      except KeyError:
+        dq.append(lambda: Events.replyErrorMessage(dq,"Unknown message type.",scope,
+                                                 lambda: Events.die(dq,scope)))
+        return
+      except BadMessageError, e:
+        dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
+                                                 lambda: Events.die(dq,scope)))
+        return
+      if msg_type == "DIE":
+        dq.append(lambda: Events.die(dq,scope))
+        return #No parallel dispatch
+      elif msg_type == "PULL_FILE":
+        scope.filename = args_dict["File Name"]
+        dq.append(lambda: Events.pushFile(dq,scope))
+        return
+      elif msg_type == "PUSH_FILE":
+        scope.filename = args_dict["File Name"]
+        scope.data = args_dict["Data"]
+        scope.curpart = args_dict["CurPart"]
+        scope.endpart = args_dict["EndPart"]
+        dq.append(lambda: Events.pullFile(dq,scope))
+        return
+      elif msg_type == "AUTH_SUBJECT":
+        scope.target = args_dict["Subject"]
+        scope.salt = args_dict["Salt"]
+        dq.append(lambda: Events.authenticate(dq,scope))
+        return
+      elif msg_type == "LIST_SUBJECT_CLIENT":
+        dq.append(lambda: Events.listSubjects(dq,scope))
+      elif msg_type == "LIST_OBJECT_CLIENT":
+        dq.append(lambda: Events.listObjects(dq,scope))
+      elif msg_type == "GIVE_TICKET_SUBJECT":
+        scope.target = args_dict["Subject"]
+        try:
+          scope.ticket = Ticket(args_dict["Ticket"])
+        except BadTicketError, e:
+          dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
+                                                     lambda: Events.die(dq,scope)))
+          return
+        dq.append(lambda: Events.giveTicket(dq,scope))
+      elif msg_type == "TAKE_TICKET_SUBJECT":
+        scope.target = args_dict["Subject"]
+        try:
+          scope.ticket = Ticket(args_dict["Ticket"])
+        except BadTicketError, e:
+          dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
+                                                     lambda: Events.die(dq,scope)))
+          return
+        dq.append(lambda: Events.takeTicket(dq,scope))
+      elif msg_type == "MAKE_DIRECTORY":
+        scope.target = args_dict["Directory"]
+        dq.append(lambda: Events.makeDirectory(dq.scope))
+      elif msg_type == "MAKE_SUBJECT":
+        scope.target = args_dict["Subject"]
+        scope.t_password = args_dict["Password"]
+        dq.append(lambda: Events.makeSubject(dq,scope))
+      elif msg_type == "CD":
+        scope.target = args_dict["Path"]
+        dq.append(lambda: Events.changeDirectory(dq,scope))
+      elif msg_type == "MAKE_FILTER":
+        scope.subject1 = args_dict["Subject1"]
+        scope.subject2 = args_dict["Subject2"]
+        try:
+          scope.ticket = Ticket(args_dict["Ticket"])
+        except BadTicketError, e:
+          dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
+                                                     lambda: Events.die(dq,scope)))
+          return
+        dq.append(lambda: Events.makeFilter(dq,scope))
+      elif msg_type == "MAKE_LINK":
+        scope.subject1 = args_dict["Subject1"]
+        scope.subject2 = args_dict["Subject2"]
+        dq.append(lambda: Events.makeLink(dq,scope))
+      elif msg_type == "DELETE_FILE":
+        scope.filename = args_dict["File Name"]
+        dq.append(lambda: Events.deleteFile(dq,scope))
+      elif msg_type == "CLEAR_FILTERS":
+        scope.target = args_dict["Subject"]
+        dq.append(lambda: Events.clearFilters(dq,scope))
+      elif msg_type == "CLEAR_LINKS"
+        scope.target = args_dict["Subject"]
+        dq.append(lambda: Events.clearLinks(dq,scope))
+      elif msg_type == "DELETE_SUBJECT":
+        scope.target = args_dict["Subject"]
+        dq.append(lambda: Events.deleteSubject(dq,scope))
     dq.append(lambda: Events.readUntilMessageEnd(dq,scope,
 	lambda: Events.waitForNextMessage(dq,scope)))
 
@@ -136,4 +239,4 @@ class Events:
     log_this_func()
     scope.socket.sendall(strategies["DIE"].build())
     scope.socket.close()
-    
+
