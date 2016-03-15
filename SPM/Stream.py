@@ -1,5 +1,6 @@
 
 import hmac
+import base64
 
 #Stream
 
@@ -29,6 +30,15 @@ class RC4:
     data = bytearray(data)
     stream = self.getBytes(len(data))
     return data ^ stream
+
+  def encrypt(self,msg):
+    msg = bytes(msg)
+    return (base64.encode(self.xor(msg)).decode(encoding='ASCII',errors="strict") + "\n"
+            ).encode('UTF-8',errors="strict")
+  
+  def decrypt(self,msg):
+    msg = bytes(msg)
+    return self.xor(base64.decode((msg.decode('UTF-8',errors="ignore").strip()).encode('ASCII')))
 
 def make_hmacf(key):
   return (lambda msg: make_hmacf_single_use(key)(msg))
