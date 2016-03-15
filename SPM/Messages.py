@@ -23,19 +23,21 @@ class MessageStrategy:
     self.use_hmac = bool(use_hmac)
     MessageStrategy.strategies[self.command] = self
 
-  def build(self,args,hmacf=None):
+  def build(self,args,hmacf=None,chunksize=1024):
     assert len(args)==self.arg_count
     if self.use_hmac:
       assert hmacf
     else:
       hmacf = lambda x: ""
     msg = ("{} ".format(self.command) + " ".join(map(repr,args))).strip()
-    msg += " " + hmacf(msg)
+    msg += " " + hmacf(msg.encode(encoding="UTF-8",errors="strict"))
     msg = msg.strip() + "\n"
     log(msg)
     if len(msg) < _min_msg_size:
-      msg += (512-len(msg)) * " "
-    return msg.encode(encoding="UTF-8")
+      msg += (1024-len(msg)) * " "
+    if len(msg) > 1024:
+      log("Message exceeded chunk size--privacy condition violated")
+    return msg.encode(encoding="UTF-8",errors="strict")
 
   def parse(self,msg,hmacf=None):
     assert msg[0]==self.command
@@ -44,7 +46,7 @@ class MessageStrategy:
       if self.arg_count+2 != len(msg):
         raise BadMessageError("Bad Message Format")
       hmac = msg[-1]
-      if not compare_digest(hmac,hmacf(" ".join(msg[:-1]))):
+      if not compare_digest(hmac,hmacf((" ".join(msg[:-1])).encode(encoding="UTF-8"))):
         raise BadMessageError("HMAC Failure")
     else:
       if self.arg_count+1 != len(msg):
@@ -66,6 +68,7 @@ PullFileStrategy		= MessageStrategy("PULL_FILE",["File Name"],True)
 PushFileStrategy		= MessageStrategy("PUSH_FILE",["File Name","Data","CurPart","EndPart"],True)
 ErrorServerStrategy		= MessageStrategy("ERROR_SERVER",["Error Message"],False)
 AuthSubjectStrategy		= MessageStrategy("AUTH_SUBJECT",["Subject","Salt"],False)
+ConfirmAuthStrategy             = MessageStrategy("CONFIRM_AUTH",["Subject"],True)
 ListSubjectsClientStrategy	= MessageStrategy("LIST_SUBJECT_CLIENT",None,True)
 ListSubjectsServerStrategy	= MessageStrategy("LIST_SUBJECT_SERVER",["Subjects"],True)
 ListObjectsClientStrategy	= MessageStrategy("LIST_OBJECT_CLIENT",None,True)

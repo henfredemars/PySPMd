@@ -23,10 +23,17 @@ class Server():
 
   def workerDispatch(self):
     while True:
+      task = None
       try:
-        self.dq.popleft()()
+        task = self.dq.popleft()
       except IndexError:
         sleep(self.idlepoll/1000)
+        continue
+      try:
+        task()
+      except IOError e:
+        log("IOError: %s" % str(e))
+        continue
 
   def mainloop(self):
     log("Dispatching worker...")
