@@ -3,7 +3,7 @@ import socket
 from . import __version__
 
 from SPM.Util import log
-from SPM.Messages import MessageStrategy
+from SPM.Messages import MessageStrategy, MessageClass, MessageType
 
 strategies = MessageStrategy.strategies
 
@@ -19,7 +19,7 @@ class Client():
     self.greetServer()
 
   def greetServer(self):
-    self.socket.sendall(strategies["HELLO_CLIENT"].build([__version__]))
+    self.socket.sendall(strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_CLIENT)].build([__version__]))
     self.buf.append(self.socket.recv(4096))
     print(self.buf)
 

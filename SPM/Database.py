@@ -22,17 +22,18 @@ class Database:
   tables = ["create table if not exists subjects(subject text primary key, password text not null, super integer not null)",
 	    "create table if not exists links(subject1 text not null, subject2 text not null, primary key (subject1,subject2))",
 	    "create table if not exists filters(subject1 text not null, subject2 text not null,ticket ticket not null, primary key (subject1,subject2,ticket))",
-	    "create table if not exists rights(subject1 text not null, ticket ticket not null, target text not null, object integer not null primary key (subject1,ticket,target,object))",
+	    "create table if not exists rights(subject1 text not null, ticket ticket not null, target text not null, object integer not null, primary key (subject1,ticket,target,object))",
 	    "create table if not exists objects(localpath text primary key, dir integer not null)"]
 
   #Setup automatic type conversions
-  sqlite3.register_adapter(Ticket,Ticket.adapt_ticket)
-  sqlite3.register_converter(Ticket,Ticket.convert_ticket)
+  sqlite3.register_adapter("Ticket",Ticket.adapt_ticket)
+  sqlite3.register_converter("Ticket",Ticket.convert_ticket)
 
   def __init__(self,db="./sys.db",root="./fileroot"):
     self.db = db
     self.root = root
     self.conn = sqlite3.connect(db,8,sqlite3.PARSE_DECLTYPES)
+    self.conn.isolation_level = None
     self.c = self.conn.cursor()
     self.c.execute("begin transaction")
     [self.c.execute(s) for s in Database.tables]

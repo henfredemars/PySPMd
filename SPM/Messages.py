@@ -1,91 +1,228 @@
 
+import struct
+
+from collections import namedtuple
+from enum import Enum
 from hmac import compare_digest
 
 from SPM.Util import log
 
-from . import _min_msg_size
+from . import _msg_size, _subject_size, _password_size
+from . import _file_size, _hash_size, _ticket_size
+from . import _error_msg_size, _salt_size, _data_size
 
 #Messages
+
+#Message Format: MessageClass(byte) MessageType(byte)...
+TypeInfo = namedtuple("TypeInfo",["bc","fmt","args","codec"])
+Codec = namedtuple("Codec",["enc","dec"])
+
+utf_enc = lambda a: str(a).encode(encoding="UTF-8",errors="ignore")
+utf_dec = lambda a: a.decode(encoding="UTF-8",errors="ignore")
+ident   = lambda a: a
 
 class BadMessageError(RuntimeError):
   def __init__(self,message):
     super().__init__(message)
     log("BadMessageError: " + message)
 
+class MessageType(Enum):
+  HELLO_SERVER          = TypeInfo(bytes([0]),"!I",("Version",),
+                            Codec(lambda a: map(int,a),
+                                  lambda a: map(int,a)))
+  HELLO_CLIENT          = TypeInfo(bytes([1]),"!I",("Version",),
+                            Codec(lambda a: map(int,a),
+                                  lambda a: map(int,a)))
+  DIE                   = TypeInfo(bytes([2]),None,None,
+                            Codec(None,None))
+  PULL_FILE             = TypeInfo(bytes([3]),"!{}s".format(_file_size),("File Name",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  PUSH_FILE             = TypeInfo(bytes([4]),"!{}s{}sII".format(_file_size,_data_size),("File Name","Data","CurPart","EndPart"),
+                            Codec(lambda a: (utf_enc(a[0]),bytes(a[1]),int(a[2]),int(a[3])),
+                                  lambda a: (utf_dec(a[0]),bytes(a[1]),int(a[2]),int(a[3]))))
+  ERROR_SERVER          = TypeInfo(bytes([5]),"!{}s".format(_error_msg_size),("Error Message",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  AUTH_SUBJECT          = TypeInfo(bytes([6]),"!{}s{}s".format(_subject_size,_salt_size),("Subject","Salt"),
+                            Codec(lambda a: (utf_enc(a[0]),bytes(a[1])),
+                                  lambda a: (utf_dec(a[0]),bytes(a[1]))))
+  CONFIRM_AUTH          = TypeInfo(bytes([7]),"!{}s".format(_subject_size),("Subject",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  REJECT_AUTH           = TypeInfo(bytes([8]),None,None,
+                            Codec(None,None))
+  LIST_SUBJECT_CLIENT   = TypeInfo(bytes([9]),None,None,
+                            Codec(None,None))
+  LIST_SUBJECT_SERVER   = TypeInfo(bytes([10]),("!{}s".format(_subject_size))*32,("Subject",)*32,
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  LIST_OBJECT_CLIENT    = TypeInfo(bytes([11]),None,None,
+                            Codec(None,None))
+  LIST_OBJECT_SERVER    = TypeInfo(bytes([12]),("!{}s".format(_file_size))*8,("File",)*8,
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  GIVE_TICKET_SUBJECT   = TypeInfo(bytes([13]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  TAKE_TICKET_SUBJECT   = TypeInfo(bytes([14]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  MAKE_DIRECTORY        = TypeInfo(bytes([15]),"!{}s".format(_file_size),("File"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  MAKE_SUBJECT          = TypeInfo(bytes([16]),"!{}s{}s".format(_subject_size,_password_size),("Subject","Password"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  CD                    = TypeInfo(bytes([17]),"!{}s".format(_file_size),("Path",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  MAKE_FILTER           = TypeInfo(bytes([18]),"!{0}s{0}s{1}s".format(_subject_size,_ticket_size),("Subject1","Subject2","Ticket"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  MAKE_LINK             = TypeInfo(bytes([19]),"!{0}s{0}s".format(_subject_size),("Subject1","Subject2"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  DELETE_FILE           = TypeInfo(bytes([20]),"!{}s".format(_file_size),("File",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  CLEAR_FILTERS         = TypeInfo(bytes([21]),"!{}s".format(_subject_size),("Subject",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  CLEAR_LINKS           = TypeInfo(bytes([22]),"!{}s".format(_subject_size),("Subject",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  DELETE_SUBJECT        = TypeInfo(bytes([23]),"!{}s".format(_subject_size),("Subject",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+
+class MessageClass(Enum):
+  PUBLIC_MSG = bytes([0])
+  PRIVATE_MSG = bytes([1])
+  
+
 class MessageStrategy:
 
   strategies = dict()
 
-  def __init__(self,command,parms_info,use_hmac):
-    self.command = command.upper()
-    self.arg_count = len(parms_info)
-    self.parms_info = parms_info
-    self.use_hmac = bool(use_hmac)
-    MessageStrategy.strategies[self.command] = self
+  fmt_h = "!1s1s"
+  fmt_t = "!{}s".format(_hash_size)
 
-  def build(self,args,hmacf=None,chunksize=1024):
-    assert len(args)==self.arg_count
-    if self.use_hmac:
-      assert hmacf
+  def __init__(self,msg_class,msg_type):
+    self.msg_class = msg_class
+    self.msg_type = msg_type
+    self.arg_count = 0 if msg_type.value.args is None else len(msg_type.value.args)
+    self.parms_info = msg_type.value.args
+    self.fmt_b = self.msg_type.value.fmt
+    MessageStrategy.strategies[(msg_class,msg_type)] = self
+
+  @staticmethod
+  def detect_class(msg_buf):
+    if msg_buf[0:1] == MessageClass.PUBLIC_MSG.value:
+      return MessageClass.PUBLIC_MSG
+    elif msg_buf[0:1] == MessageClass.PRIVATE_MSG.value:
+      return MessageClass.PRIVATE_MSG
+    raise BadMessageError("Invalid message class")
+
+  @staticmethod
+  def detect_type(msg_buf):
+    for msg_type in MessageType:
+      if msg_buf[1:2] == msg_type.value.bc:
+        return msg_type
+    raise BadMessageError("Failed to detect message type")
+      
+  def build(self,args=None,stream=None,hmacf=None):
+    if self.arg_count:
+      assert len(args)==self.arg_count
     else:
-      hmacf = lambda x: ""
-    msg = ("{} ".format(self.command) + " ".join(map(repr,args))).strip()
-    msg += " " + hmacf(msg.encode(encoding="UTF-8",errors="strict"))
-    msg = msg.strip() + "\n"
-    log(msg)
-    if len(msg) < _min_msg_size:
-      msg += (1024-len(msg)) * " "
-    if len(msg) > 1024:
-      log("Message exceeded chunk size--privacy condition violated")
-    return msg.encode(encoding="UTF-8",errors="strict")
-
-  def parse(self,msg,hmacf=None):
-    assert msg[0]==self.command
-    if self.use_hmac:
-      assert hmacf
-      if self.arg_count+2 != len(msg):
-        raise BadMessageError("Bad Message Format")
-      hmac = msg[-1]
-      if not compare_digest(hmac,hmacf((" ".join(msg[:-1])).encode(encoding="UTF-8"))):
-        raise BadMessageError("HMAC Failure")
+      assert not args
+    assert bool(stream) == bool(hmacf)
+    assert self.msg_class != MessageClass.PRIVATE_MSG or (stream and hmacf)
+    header_buf = struct.pack(MessageStrategy.fmt_h,self.msg_class.value,
+                                self.msg_type.value.bc)
+    if args:
+      args = tuple(self.msg_type.value.codec.enc(args))
+      body_buf = struct.pack(self.fmt_b,*args)
     else:
-      if self.arg_count+1 != len(msg):
-        raise BadMessageError("Bad Message Format")
-    msg_args = dict()
-    if self.parms_info:
-      for i in range(self.arg_count):
-        msg_args[self.parms_info[i]] = msg[i+1]
-    return msg_args
+      body_buf = bytes([0])
+    body_buf += bytes([0])*(_msg_size-(len(body_buf)+len(header_buf)+_hash_size))
+    msg_buf = header_buf[1:2] + body_buf
+    if self.msg_class == MessageClass.PRIVATE_MSG:
+      msg_buf = stream.xor(msg_buf)
+      msg_buf += struct.pack(MessageStrategy.fmt_t,hmacf(msg_buf))
+    else:
+      msg_buf += bytes([0])*_hash_size
+    msg_buf = header_buf[0:1] + msg_buf
+    assert len(msg_buf) == _msg_size
+    return msg_buf
 
+  @staticmethod
+  def parse(msg_buf,stream=None,hmacf=None):
+    assert msg_buf
+    assert bool(stream) == bool(hmacf)
+    assert len(msg_buf) == _msg_size
+    msg_class = MessageStrategy.detect_class(msg_buf)
+    if msg_class == MessageClass.PRIVATE_MSG:
+      if compare_digest(hmacf(msg_buf[1:-_hash_size]),msg_buf[-_hash_size:]):
+        msg_buf = msg_buf[0] + stream.xor(msg_buf[1:-_hash_size])
+      else:
+        raise BadMessageError("Message integrity check failure")
+    msg_type = MessageStrategy.detect_type(msg_buf)
+    if not (msg_class,msg_type) in strategies:
+      raise BadMessageError("Bad msg_class,msg_type combination")
+    fmt_b = msg_type.value.fmt
+    msg_dict = dict()
+    if fmt_b:
+      contents = struct.unpack_from(fmt_b,msg_buf,2)
+      contents = tuple(msg_type.value.codec.dec(contents))
+      arg_count = len(msg_type.value.args)
+      assert len(contents) == len(msg_type.value.args)
+      for i in range(arg_count):
+        msg_dict[msg_type.value[2][i]] = contents[i]
+    msg_dict["MessageClass"] = msg_class
+    msg_dict["MessageType"] = msg_type
+    return msg_dict
+    
   def __repr__(self):
     str(self.__class__) + ": " + str(self.__dict__)
 
+#Public messages
+MessageStrategy(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)
+MessageStrategy(MessageClass.PUBLIC_MSG,MessageType.HELLO_CLIENT)
+MessageStrategy(MessageClass.PUBLIC_MSG,MessageType.DIE)
+MessageStrategy(MessageClass.PUBLIC_MSG,MessageType.ERROR_SERVER)
+MessageStrategy(MessageClass.PUBLIC_MSG,MessageType.AUTH_SUBJECT)
+MessageStrategy(MessageClass.PUBLIC_MSG,MessageType.REJECT_AUTH)
 
-HelloServerStrategy		= MessageStrategy("HELLO_SERVER",["Version"],False)
-HelloClientStrategy		= MessageStrategy("HELLO_CLIENT",["Version"],False)
-DieStrategy			= MessageStrategy("DIE",None,False)
-PullFileStrategy		= MessageStrategy("PULL_FILE",["File Name"],True)
-PushFileStrategy		= MessageStrategy("PUSH_FILE",["File Name","Data","CurPart","EndPart"],True)
-ErrorServerStrategy		= MessageStrategy("ERROR_SERVER",["Error Message"],False)
-AuthSubjectStrategy		= MessageStrategy("AUTH_SUBJECT",["Subject","Salt"],False)
-ConfirmAuthStrategy             = MessageStrategy("CONFIRM_AUTH",["Subject"],True)
-ListSubjectsClientStrategy	= MessageStrategy("LIST_SUBJECT_CLIENT",None,True)
-ListSubjectsServerStrategy	= MessageStrategy("LIST_SUBJECT_SERVER",["Subjects"],True)
-ListObjectsClientStrategy	= MessageStrategy("LIST_OBJECT_CLIENT",None,True)
-ListObjectsServerStrategy	= MessageStrategy("LIST_OBJECT_SERVER",["Objects"],True)
-GiveTicketSubject		= MessageStrategy("GIVE_TICKET_SUBJECT",["Subject","Ticket"],True)
-TakeTicketSubject		= MessageStrategy("TAKE_TICKET_SUBJECT",["Subject","Ticket"],True)
-MakeDirectory			= MessageStrategy("MAKE_DIRECTORY",["Directory"],True)
-MakeSubject			= MessageStrategy("MAKE_SUBJECT",["Subject","Password"],True)
-ChangeDirStrategy		= MessageStrategy("CD",["Path"],True)
-MakeFilter			= MessageStrategy("MAKE_FILTER",["Subject1","Subject2","Ticket"],True)
-MakeLink			= MessageStrategy("MAKE_LINK",["Subject1","Subject2"],True)
-DeleteFileStrategy		= MessageStrategy("DELETE_FILE",["File Name"],True)
-ClearFilters			= MessageStrategy("CLEAR_FILTERS",["Subject"],True)
-ClearLinks			= MessageStrategy("CLEAR_LINKS",["Subject"],True)
-DeleteSubject			= MessageStrategy("DELETE_SUBJECT",["Subject"],True)
+#Private messages
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.DIE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.AUTH_SUBJECT)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PULL_FILE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.REJECT_AUTH)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_CLIENT)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_SERVER)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_OBJECT_CLIENT)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_OBJECT_SERVER)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.GIVE_TICKET_SUBJECT)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.TAKE_TICKET_SUBJECT)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_DIRECTORY)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_SUBJECT)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_FILTER)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_LINK)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CD)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.DELETE_FILE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CLEAR_LINKS)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CLEAR_FILTERS)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.DELETE_SUBJECT)
 
+#Table of strategies for building messages
 strategies = MessageStrategy.strategies
+
+for msg_type in MessageType:
+  assert bool(msg_type.value.fmt) == bool(msg_type.value.args)
 
 #Notes
 #
@@ -98,3 +235,4 @@ strategies = MessageStrategy.strategies
 #Passwords are stored on the server for each client as the shared secret for key generation
 #Neither links nor filters are bidirectional
 #Super subjects exist that can create and destroy links and filters
+#Some commands allow longer subject names than others

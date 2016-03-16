@@ -31,7 +31,7 @@ class Server():
         continue
       try:
         task()
-      except IOError e:
+      except IOError as e:
         log("IOError: %s" % str(e))
         continue
 
