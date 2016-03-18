@@ -1,4 +1,4 @@
-from . import __version__, _msg_size, _hash_rounds
+from . import __version__, _msg_size, _hash_rounds, _data_size
 from SPM.Util import log
 
 from time import time as time_sec
@@ -170,7 +170,7 @@ class Events:
         return #No parallel dispatch
       elif msg_type == MessageType.PUSH_FILE:
         scope.filename = msg_dict["File Name"]
-        scope.data = msg_dict["Data"]
+        scope.data = None
         scope.curpart = 0
         scope.endpart = msg_dict["EndPart"]
         dq.append(lambda: Events.pullFile(dq,scope))
@@ -270,7 +270,6 @@ class Events:
   def pullFile(dq,scope):
     log_this_func()
     assert scope.filename
-    assert scope.data
     assert scope.curpart
     assert scope.endpart
     assert scope.stream
@@ -308,12 +307,16 @@ class Events:
     assert scope.stream
     assert scope.curpart
     assert scope.endpart
-    assert scope.data
-    try:
-      scope.fd.write(scope.data)
-    except IOError:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Error writing file",scope,
+    if scope.data:
+      try:
+        scope.fd.write(scope.data)
+      except IOError:
+        dq.append(lambda: Events.replyErrorMessage(dq,"Error writing file",scope,
                                                      lambda: Events.die(dq,scope)))
+      return
+    else:
+      dq.append(lambda: Events.readUntilMessageEnd(dq, scope,
+                    lambda: Events.unpackMsgToPullFilePart(dq,scope)))
       return
     if scope.curpart == scope.endpart:
       scope.curpart = 0
@@ -332,27 +335,26 @@ class Events:
   @staticmethod
   def unpackMsgToPullFilePart(dq,scope):
     msg_dict = scope.useMsg()
-    if msg_dict["MessageType"] != MessageType.PUSH_FILE:
+    if msg_dict["MessageType"] != MessageType.XFER_FILE:
       dq.append(lambda: Events.replyErrorMessage(dq,"Bad message sequence",scope,
                                                      lambda: Events.die(dq,scope)))
     else:
-      next_filename = msg_dict["File Name"]
       scope.data = msg_dict["Data"]
       next_curpart = msg_dict["CurPart"]
-      next_endpart = msg_dict["EndPart"]
-      if (next_filename != scope.filename or next_curpart != scope.curpart or
-          next_endpart != scope.endpart):
+      if next_curpart != scope.curpart:
         dq.append(lambda: Events.replyErrorMessage(dq,"Bad message sequence",scope,
                                                      lambda: Events.die(dq,scope)))
         return
       dq.append(lambda: Events.pullFilePart(dq,scope))
 
   @staticmethod
-  def sendFilePart(dq,scope,sendsize=800):
+  def sendFilePart(dq,scope):
     log_this_func()
     assert scope.filename
     assert scope.fd
     assert scope.stream
+    assert scope.curpart
+    assert scope.endpart
     if scope.curpart > scope.endpart:
       scope.curpart = 0
       scope.endpart = 0
@@ -364,12 +366,12 @@ class Events:
       dq.append(lambda: Events.waitForNextMessage(dq,scope))
     else:
       try:
-        data = scope.fd.read(sendsize)
+        data = scope.fd.read(_data_size)
       except IOError:
         dq.append(lambda: Events.replyErrorMessage(dq,"Error reading file",scope,
                                                      lambda: Events.die(dq,scope)))
         return
-      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)].build([
+      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build([
         scope.filename,data,scope.curpart,scope.endpart],scope.stream,scope.hmacf)
       scope.curpart += 1
       scope.socket.sendall(msg_encoded)
