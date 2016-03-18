@@ -38,9 +38,12 @@ class MessageType(Enum):
   PULL_FILE             = TypeInfo(bytes([3]),"!{}s".format(_file_size),("File Name",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  PUSH_FILE             = TypeInfo(bytes([4]),"!{}s{}sII".format(_file_size,_data_size),("File Name","Data","CurPart","EndPart"),
-                            Codec(lambda a: (utf_enc(a[0]),bytes(a[1]),int(a[2]),int(a[3])),
-                                  lambda a: (utf_dec(a[0]),bytes(a[1]),int(a[2]),int(a[3]))))
+  PUSH_FILE             = TypeInfo(bytes([4]),"!{}sQ".format(_file_size),("File Name","EndPart"),
+                            Codec(lambda a: (utf_enc(a[0]),int(a[1])),
+                                  lambda a: (utf_dec(a[0]),int(a[1]))))
+  XFER_FILE             = TypeInfo(bytes([4]),"!{}sQ".format(_data_size),("Data","CurPart"),
+                            Codec(lambda a: (bytes(a[0]),int(a[1])),
+                                  lambda a: (bytes(a[0]),int(a[1]))))
   ERROR_SERVER          = TypeInfo(bytes([5]),"!{}s".format(_error_msg_size),("Error Message",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
@@ -54,12 +57,12 @@ class MessageType(Enum):
                             Codec(None,None))
   LIST_SUBJECT_CLIENT   = TypeInfo(bytes([9]),None,None,
                             Codec(None,None))
-  LIST_SUBJECT_SERVER   = TypeInfo(bytes([10]),("!{}s".format(_subject_size))*32,("Subject",)*32,
+  LIST_SUBJECT_SERVER   = TypeInfo(bytes([10]),("!{}s".format(_subject_size))*31,("Subject",)*31,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   LIST_OBJECT_CLIENT    = TypeInfo(bytes([11]),None,None,
                             Codec(None,None))
-  LIST_OBJECT_SERVER    = TypeInfo(bytes([12]),("!{}s".format(_file_size))*8,("File",)*8,
+  LIST_OBJECT_SERVER    = TypeInfo(bytes([12]),("!{}s".format(_file_size))*7,("File",)*7,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   GIVE_TICKET_SUBJECT   = TypeInfo(bytes([13]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
@@ -68,7 +71,7 @@ class MessageType(Enum):
   TAKE_TICKET_SUBJECT   = TypeInfo(bytes([14]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_DIRECTORY        = TypeInfo(bytes([15]),"!{}s".format(_file_size),("File"),
+  MAKE_DIRECTORY        = TypeInfo(bytes([15]),"!{}s".format(_file_size),("Directory"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   MAKE_SUBJECT          = TypeInfo(bytes([16]),"!{}s{}s".format(_subject_size,_password_size),("Subject","Password"),
@@ -83,7 +86,7 @@ class MessageType(Enum):
   MAKE_LINK             = TypeInfo(bytes([19]),"!{0}s{0}s".format(_subject_size),("Subject1","Subject2"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  DELETE_FILE           = TypeInfo(bytes([20]),"!{}s".format(_file_size),("File",),
+  DELETE_FILE           = TypeInfo(bytes([20]),"!{}s".format(_file_size),("File Name",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   CLEAR_FILTERS         = TypeInfo(bytes([21]),"!{}s".format(_subject_size),("Subject",),
@@ -200,6 +203,7 @@ MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.AUTH_SUBJECT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PULL_FILE)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.REJECT_AUTH)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_CLIENT)
