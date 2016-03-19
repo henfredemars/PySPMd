@@ -18,7 +18,7 @@ TypeInfo = namedtuple("TypeInfo",["bc","fmt","args","codec"])
 Codec = namedtuple("Codec",["enc","dec"])
 
 utf_enc = lambda a: str(a).encode(encoding="UTF-8",errors="ignore")
-utf_dec = lambda a: a.decode(encoding="UTF-8",errors="ignore")
+utf_dec = lambda a: (a.decode(encoding="UTF-8",errors="ignore")).strip("\0")
 ident   = lambda a: a
 
 class BadMessageError(RuntimeError):
@@ -166,8 +166,10 @@ class MessageStrategy:
     assert len(msg_buf) == _msg_size
     msg_class = MessageStrategy.detect_class(msg_buf)
     if msg_class == MessageClass.PRIVATE_MSG:
+      assert stream
+      assert hmacf
       if compare_digest(hmacf(msg_buf[1:-_hash_size]),msg_buf[-_hash_size:]):
-        msg_buf = msg_buf[0] + stream.xor(msg_buf[1:-_hash_size])
+        msg_buf = msg_buf[0:1] + stream.xor(msg_buf[1:-_hash_size])
       else:
         raise BadMessageError("Message integrity check failure")
     msg_type = MessageStrategy.detect_type(msg_buf)

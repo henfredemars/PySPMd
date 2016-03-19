@@ -10,13 +10,13 @@ import hashlib
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType
 from SPM.Messages import BadMessageError
-from SPM.Database import Database
 from SPM.Database import DatabaseError
 from SPM.Tickets import Ticket, BadTicketError
 from SPM.Stream import RC4, make_hmacf
 
 strategies = MessageStrategy.strategies
-db = Database()
+db = None #Worker thread must initialize this to Database() because
+          #sqlite3 demands same thread uses this reference
 
 #Events and shared event data
 
@@ -146,21 +146,20 @@ class Events:
 
   @staticmethod
   def waitForNextMessage(dq,scope):
-    log_this_func()
-    if scope.msg_dict:
-      raise RuntimeError("BUG! Cannot wait for msg while msg pending")
-    while len(scope.buf) >= _msg_size:
+    while len(scope.buf) >= _msg_size or scope.msg_dict:
       try:
-        scan_for_message_and_parse(scope)
+        if not scope.msg_dict:
+          scan_for_message_and_parse(scope)
       except BadMessageError:
         dq.append(lambda: Events.replyErrorMessage(dq,"BadMessageError",scope,
                                                  lambda: Events.die(dq,scope)))
         return
       msg_dict = scope.useMsg()
       msg_type = msg_dict["MessageType"]
+      log(str(msg_type))
       #Switch on all possible messages
       if msg_type == MessageType.DIE:
-        dq.append(lambda: Events.die(dq,scope))
+        scope.socket.close()
         return #No parallel dispatch
       elif msg_type == MessageType.PULL_FILE:
         scope.filename = msg_dict["File Name"]
@@ -238,6 +237,9 @@ class Events:
       elif msg_type == MessageType.DELETE_SUBJECT:
         scope.target = msg_dict["Subject"]
         dq.append(lambda: Events.deleteSubject(dq,scope))
+      else:
+         dq.append(lambda: Events.replyErrorMessage(dq,"Unexpected message type",scope,
+                                                     lambda: Events.die(dq,scope)))
     dq.append(lambda: Events.readUntilMessageEnd(dq,scope,
 	lambda: Events.waitForNextMessage(dq,scope)))
 
@@ -384,8 +386,8 @@ class Events:
     try:
       target_entry = db.getSubject(scope.target)
       if target_entry:
-        scope.key = hashlib.pbkdf2_hmac(target_entry.subject,target_entry.password,scope.salt,
-                                  _hash_rounds, dklen=256)
+        scope.key = hashlib.pbkdf2_hmac("sha1",target_entry.password.encode(
+          "UTF-8",errors="ignore"),scope.salt,_hash_rounds, dklen=256)
         scope.stream = RC4(scope.key)
         scope.hmacf = make_hmacf(scope.key)
         msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)].build([
@@ -410,7 +412,8 @@ class Events:
     log_this_func()
     log("Sent error message: %s" % message)
     if scope.stream:
-      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)].build(message)
+      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)].build(message,
+                                                                      scope.stream,scope.hmacf)
     else:
       msg_encoded = strategies[(MessageClass.PUBLIC_MSG,MessageType.ERROR_SERVER)].build(message)
     scope.socket.sendall(msg_encoded)
