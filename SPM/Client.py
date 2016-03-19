@@ -1,9 +1,10 @@
 
 import socket
 import hashlib
+import math
 from os import urandom
 
-from . import __version__, _msg_size, _hash_rounds
+from . import __version__, _msg_size, _hash_rounds, _data_size
 
 from SPM.Util import log
 from SPM.Messages import MessageStrategy, MessageClass, MessageType, BadMessageError
@@ -84,6 +85,25 @@ class Client():
       print("Unexpected message from the server (bad password)")
       self.resetConnection()
       return False
+
+  def sendFile(self,remotename,localpath):
+    if not os.path.isfile(localpath):
+      raise ClientError("File does not exist.")
+    if not self.connected:
+      raise ClientError("No active connection.")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated.")
+    f_size = os.path.getsize(localpath)
+    f_parts = math.ceil(f_size/_data_size)
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)].build(
+                        [os.path.basename(remotename),f_parts-1],self.stream,self.hmacf))
+    with open(path,"rb") as fd:
+      for curpart in range(f_parts):
+        print("Sending part {} of {}...".format(curpart,f_parts-1))
+        data = fd.read(_data_size)
+        self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build(
+          [data,curpart,len(data)],self.stream,self.hmacf))
+        
 
   def resetConnection(self):
     self.stream = None

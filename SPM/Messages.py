@@ -41,9 +41,9 @@ class MessageType(Enum):
   PUSH_FILE             = TypeInfo(bytes([4]),"!{}sQ".format(_file_size),("File Name","EndPart"),
                             Codec(lambda a: (utf_enc(a[0]),int(a[1])),
                                   lambda a: (utf_dec(a[0]),int(a[1]))))
-  XFER_FILE             = TypeInfo(bytes([4]),"!{}sQ".format(_data_size),("Data","CurPart"),
-                            Codec(lambda a: (bytes(a[0]),int(a[1])),
-                                  lambda a: (bytes(a[0]),int(a[1]))))
+  XFER_FILE             = TypeInfo(bytes([4]),"!{}sQH".format(_data_size),("Data","CurPart","BSize"),
+                            Codec(lambda a: (bytes(a[0]),int(a[1]),int(a[2])),
+                                  lambda a: (bytes(a[0]),int(a[1]),int(a[2]))))
   ERROR_SERVER          = TypeInfo(bytes([5]),"!{}s".format(_error_msg_size),("Error Message",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))

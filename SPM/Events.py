@@ -39,8 +39,10 @@ class ClientData:
     self.lastreadtime = None      #Last attempt to read from socket
     self.blocktime = 0            #Time to sleep after reading empty socket
     self.filename = None          #File name
-    self.fd = None
-    self.data = None              #Binary file data block
+    self.fd = None                #Open file discriptor
+    self.in_data = None           #Incoming data block
+    self.out_data = None          #Outgoing data block
+    self.bytes_sent = 0           #Bytes sent of message to client
     self.curpart = 0              #Xfer progress
     self.endpart = 0              #Xfer EOF detection
     self.cd = "/"                 #Client virtual working directory
@@ -77,7 +79,7 @@ def update_blocktime(scope):
   scope.blocktime = next_block_time(scope.blocktime,ct-scope.lastreadtime)
   scope.lastreadtime = ct
 
-def next_block_time(last_time,call_delta,target_depth=700,precision=10):
+def next_block_time(last_time,call_delta,target_depth=500,precision=10):
   if call_delta > target_depth:
     return last_time//2
   return last_time+precision
@@ -118,6 +120,7 @@ class Events:
 
   @staticmethod
   def readMessagePart(dq,scope,next):
+    assert socket
     update_blocktime(scope)
     try:
       incoming_part = bytearray(scope.socket.recv(4096))
@@ -127,6 +130,23 @@ class Events:
       pass
     dq.append(lambda: next())
 
+  @staticmethod
+  def sendMessage(dq,scope,next):
+    assert(scope.socket)
+    assert(scope.out_data)
+    scope.bytes_sent = 0
+    Events.sendMessagePart(dq,scope,next)
+
+  @staticmethod
+  def sendMessagePart(dq,scope,next):
+    scope.bytes_sent += scope.socket.send(scope.out_data)
+    if scope.bytes_sent != len(scope.out_data):
+      dq.append(lambda: Events.sendMessagePart(dq,scope,next))
+    else:
+      scope.bytes_sent = 0
+      scope.out_data = None
+      dq.append(lambda: next())
+      
   @staticmethod
   def checkHelloAndReply(dq,scope):
     log_this_func()
@@ -141,8 +161,8 @@ class Events:
       dq.append(lambda: Events.replyErrorMessage(dq,"Version mismatch.",scope,
                                                  lambda: Events.die(dq,scope)))
       return
-    scope.socket.sendall(strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)].build([__version__]))
-    dq.append(lambda: Events.waitForNextMessage(dq,scope))
+    scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)].build([__version__])
+    Events.sendMessage(dq,scope, lambda: Events.waitForNextMessage(dq,scope))
 
   @staticmethod
   def waitForNextMessage(dq,scope):
@@ -169,7 +189,7 @@ class Events:
         return #No parallel dispatch
       elif msg_type == MessageType.PUSH_FILE:
         scope.filename = msg_dict["File Name"]
-        scope.data = None
+        scope.in_data = None
         scope.curpart = 0
         scope.endpart = msg_dict["EndPart"]
         dq.append(lambda: Events.pullFile(dq,scope))
@@ -309,9 +329,9 @@ class Events:
     assert scope.stream
     assert scope.curpart
     assert scope.endpart
-    if scope.data:
+    if scope.in_data:
       try:
-        scope.fd.write(scope.data)
+        scope.fd.write(scope.in_data)
       except IOError:
         dq.append(lambda: Events.replyErrorMessage(dq,"Error writing file",scope,
                                                      lambda: Events.die(dq,scope)))
@@ -326,11 +346,10 @@ class Events:
       scope.filename = None
       scope.fd.close()
       scope.fd = None
-      scope.data = None
+      scope.in_data = None
       log("All file parts have been recorded.")
       dq.append(lambda: Events.waitForNextMessage(dq,scope))
     else:
-      scope.curpart += 1
       dq.append(lambda: Events.readUntilMessageEnd(dq, scope,
                     lambda: Events.unpackMsgToPullFilePart(dq,scope)))
 
@@ -341,12 +360,13 @@ class Events:
       dq.append(lambda: Events.replyErrorMessage(dq,"Bad message sequence",scope,
                                                      lambda: Events.die(dq,scope)))
     else:
-      scope.data = msg_dict["Data"]
+      scope.in_data = msg_dict["Data"][0:msg_dict["BSize"]]
       next_curpart = msg_dict["CurPart"]
       if next_curpart != scope.curpart:
         dq.append(lambda: Events.replyErrorMessage(dq,"Bad message sequence",scope,
                                                      lambda: Events.die(dq,scope)))
         return
+      scope.curpart += 1
       dq.append(lambda: Events.pullFilePart(dq,scope))
 
   @staticmethod
@@ -363,7 +383,6 @@ class Events:
       scope.filename = None
       scope.fd.close()
       scope.fd = None
-      scope.data = None
       log("All file parts have been sent.")
       dq.append(lambda: Events.waitForNextMessage(dq,scope))
     else:
@@ -373,11 +392,10 @@ class Events:
         dq.append(lambda: Events.replyErrorMessage(dq,"Error reading file",scope,
                                                      lambda: Events.die(dq,scope)))
         return
-      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build([
-        scope.filename,data,scope.curpart,scope.endpart],scope.stream,scope.hmacf)
+      scope.out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build([
+        data,scope.curpart,len(data)],scope.stream,scope.hmacf)
       scope.curpart += 1
-      scope.socket.sendall(msg_encoded)
-      dq.append(lambda: Events.sendFilePart(dq,scope))
+      Events.sendMessage(dq,scope,lambda: Events.sendFilePart(dq,scope))
 
   @staticmethod
   def authenticate(dq,scope):
@@ -390,16 +408,15 @@ class Events:
           "UTF-8",errors="ignore"),scope.salt,_hash_rounds, dklen=256)
         scope.stream = RC4(scope.key)
         scope.hmacf = make_hmacf(scope.key)
-        msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)].build([
+        scope.out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)].build([
           target_entry.subject],scope.stream,scope.hmacf)
         scope.subject = target_entry.subject
       else:
-        msg_encoded = strategies[(MessageClass.PUBLIC_MSG,MessageType.REJECT_AUTH)].build()
+        scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.REJECT_AUTH)].build()
         scope.key = None
         scope.stream = None
         scope.hmacf = None
-      scope.socket.sendall(msg_encoded)
-      dq.append(lambda: Events.waitForNextMessage(dq,scope))
+      Events.sendMessage(dq,scope,lambda: Events.waitForNextMessage(dq,scope))
     except DatabaseError as e:
       dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
                                                      lambda: Events.die(dq,scope)))
@@ -412,20 +429,18 @@ class Events:
     log_this_func()
     log("Sent error message: %s" % message)
     if scope.stream:
-      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)].build(message,
+      scope.out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)].build(message,
                                                                       scope.stream,scope.hmacf)
     else:
-      msg_encoded = strategies[(MessageClass.PUBLIC_MSG,MessageType.ERROR_SERVER)].build(message)
-    scope.socket.sendall(msg_encoded)
-    dq.append(lambda: next())
+      scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.ERROR_SERVER)].build(message)
+    Events.sendMessage(dq,scope,lambda: next())
 
   @staticmethod
   def die(dq,scope):
     log_this_func()
     if scope.stream:
-      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.DIE)].build()
+      scope.out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.DIE)].build()
     else:
-      msg_encoded = strategies[(MessageClass.PUBLIC_MSG,MessageType.DIE)].build()
-    scope.socket.sendall(msg_encoded)
-    scope.socket.close()
+      scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.DIE)].build()
+    Events.sendMessage(dq,scope,lambda: scope.socket.close())
 

@@ -42,6 +42,9 @@ class Database:
       os.mkdir(self.root)
     os.chdir(self.root)
 
+  def __enter__(self):
+    return self
+
   def insertSubject(self,name, password, super=False):
     if not password or not name:
       raise DatabaseError("Name and password are required.")
@@ -50,7 +53,7 @@ class Database:
     if self.c.fetchone():
       self.c.execute("end transaction")
       raise DatabaseError("The subject already exists.")
-    self.c.execute("insert into subjects values(?,?,?)", (name,password,str(super)))
+    self.c.execute("insert into subjects values(?,?,?)", (name,password,super))
     self.c.execute("end transaction")
 
   def getSubject(self,name):
@@ -214,7 +217,7 @@ class Database:
         if not os.path.isdir(path_so_far):
           raise DatabaseError("A parent directory is missing from the filesystem.")
     self.c.execute("begin transaction")
-    self.c.execute("insert into objects values(?,?),(localpath,isdir)")
+    self.c.execute("insert into objects values(?,?)",(localpath,isdir))
     self.c.execute("end transaction")
 
   def getObject(self,localpath):
@@ -265,6 +268,9 @@ class Database:
     self.c.execute("begin transaction")
     self.c.execute("delete from objects where localpath=?",(localpath,))
     self.c.execute("end transaction")
+
+  def __exit__(self,exc_type,exc_value,traceback):
+    self.close()
 
   def close(self):
     self.conn.close()
