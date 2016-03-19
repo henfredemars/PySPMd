@@ -1,7 +1,8 @@
 import socket
 
-from SPM.Events import Events
+from SPM.Database import Database
 from SPM.Util import log
+import SPM.Events as EventServices
 
 from collections import deque
 from threading import Thread
@@ -22,6 +23,7 @@ class Server():
     self.worker = Thread(target = self.workerDispatch, daemon = True)
 
   def workerDispatch(self):
+    EventServices.db = Database()
     while True:
       task = None
       try:
@@ -41,5 +43,5 @@ class Server():
     log("Entering main loop...")
     while True:
       (socket,addr) = self.socket.accept()
-      self.dq.append(lambda: Events.acceptClient(self.dq,socket))
+      self.dq.append(lambda: EventServices.Events.acceptClient(self.dq,socket))
 

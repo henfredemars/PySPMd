@@ -50,13 +50,13 @@ class Database:
     if self.c.fetchone():
       self.c.execute("end transaction")
       raise DatabaseError("The subject already exists.")
-    self.c.execute("insert into subjects values(?,?,?)", (name,password,super))
+    self.c.execute("insert into subjects values(?,?,?)", (name,password,str(super)))
     self.c.execute("end transaction")
 
   def getSubject(self,name):
     if not name:
       raise DatabaseError("Cannot fetch subject without a name.")
-    self.c.execute("select subject from subjects where subject=?",(name,))
+    self.c.execute("select * from subjects where subject=?",(name,))
     t = self.c.fetchone()
     if t:
       return Subject(*t)
@@ -181,7 +181,7 @@ class Database:
       raise DatabaseError("No ticket provided.")
     self.c.execute("select subject,ticket,target,object from rights where subject=? and ticket=? and target=? and isobject=?",
 	(subject,ticket,target,isobject))
-    t = self.c.findone()
+    t = self.c.fetchone()
     if t:
       return Right(*t)
     return None
@@ -208,7 +208,7 @@ class Database:
     if localpath[0] != "/":
       raise DatabaseError("The path is invalid.")
     path_so_far = self.root
-    for folder in localpath.split():
+    for folder in localpath.split(os.sep):
       if folder and (not folder == os.path.basename(localpath)):
         path_so_far = os.path.join(path_so_far,folder)
         if not os.path.isdir(path_so_far):
@@ -265,3 +265,7 @@ class Database:
     self.c.execute("begin transaction")
     self.c.execute("delete from objects where localpath=?",(localpath,))
     self.c.execute("end transaction")
+
+  def close(self):
+    self.conn.close()
+    

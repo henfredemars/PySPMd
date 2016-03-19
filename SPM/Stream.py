@@ -25,11 +25,12 @@ class RC4:
       j = (j + self.s[i]) % 256
       self.s[i], self.s[j] = self.s[j], self.s[i]
       stream.append(self.s[(self.s[i]+self.s[j]) % 256])
+    return stream
 
   def xor(self,data):
     data = bytearray(data)
     stream = self.getBytes(len(data))
-    return data ^ stream
+    return bytearray(map(lambda b: b[0]^b[1],zip(data,stream)))
 
   def encrypt(self,msg):
     msg = bytes(msg)
