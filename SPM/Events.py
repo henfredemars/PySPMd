@@ -1,7 +1,6 @@
 from . import __version__, _msg_size, _hash_rounds, _data_size
 from SPM.Util import log
 
-from time import time as time_sec
 from time import sleep
 import os
 import inspect
@@ -13,6 +12,7 @@ from SPM.Messages import BadMessageError
 from SPM.Database import DatabaseError
 from SPM.Tickets import Ticket, BadTicketError
 from SPM.Stream import RC4, make_hmacf
+from SPM.Priority import Priority
 
 strategies = MessageStrategy.strategies
 db = None #Worker thread must initialize this to Database() because
@@ -36,8 +36,7 @@ class ClientData:
     self.key = None               #Encryption key
     self.hmacf = None             #Message signing function
     self.stream = None            #Keystream generator object
-    self.lastreadtime = None      #Last attempt to read from socket
-    self.blocktime = 0            #Time to sleep after reading empty socket
+    self.priority = 0             #Time left to sleep-500ms
     self.filename = None          #File name
     self.fd = None                #Open file discriptor
     self.in_data = None           #Incoming data block
@@ -55,12 +54,6 @@ class ClientData:
 
 #Utility functions (for code readability), time units are in ms
 log_this_func = lambda: log(inspect.stack()[1][3])
-time = lambda: time_sec()*1000
-
-#Set first lastreadtime to a resonable value
-def init_lastreadtime(scope):
-  if scope.lastreadtime is None:
-    scope.lastreadtime = time()
 
 #Measure time we last tried to read from the socket and block if no data to keep the time
 #  for an event to pass through the queue near target_depth ms. If the server starts
@@ -73,16 +66,6 @@ def init_lastreadtime(scope):
 #  check for incoming data (in this case we will soon block a long time), while not blocking
 #  when the server is fully loaded (in this case we quickly handle the check socket event
 #  to move on with more pressing matters...)
-def update_blocktime(scope):
-  init_lastreadtime(scope)
-  ct = time()
-  scope.blocktime = next_block_time(scope.blocktime,ct-scope.lastreadtime)
-  scope.lastreadtime = ct
-
-def next_block_time(last_time,call_delta,target_depth=500,precision=10):
-  if call_delta > target_depth:
-    return last_time//2
-  return last_time+precision
 
 def scan_for_message_and_parse(scope):
   if scope.msg_dict:
@@ -94,85 +77,92 @@ def scan_for_message_and_parse(scope):
 class Events:
 
   @staticmethod
-  def acceptClient(dq,socket):
+  def acceptClient(i,pq,socket):
     log_this_func()
     addr = socket.getpeername()
     print("Accepted connection from %s:%i" % addr)
     scope = ClientData(socket)
-    dq.append(lambda: Events.readUntilMessageEnd(dq,scope,
-	lambda: Events.checkHelloAndReply(dq,scope)))
+    pq.put(Priority.HIGH.value,lambda i: Events.readUntilMessageEnd(i,pq,scope,
+	lambda j: Events.checkHelloAndReply(j,pq,scope)))
 
   @staticmethod
-  def readUntilMessageEnd(dq,scope,next):
+  def readUntilMessageEnd(i,pq,scope,next):
+    log_this_func()
     if scope.buf:
       try:
         scan_for_message_and_parse(scope)
       except BadMessageError:
-        dq.append(lambda: Events.replyErrorMessage(dq,"BadMessageError",scope,
-                                                 lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"BadMessageError",scope,
+                                                 lambda j: Events.die(j,pq,scope)))
         return
     if scope.msg_dict:
       log("Got full message")
-      dq.append(lambda: next())
+      pq.put(Priority.HIGH.value,lambda i: next(i))
     else:
-      dq.append(lambda: Events.readMessagePart(dq,scope,
-	lambda: Events.readUntilMessageEnd(dq,scope,next)))
+      pq.put(i,lambda i: Events.readMessagePart(i,pq,scope,
+	lambda j: Events.readUntilMessageEnd(j,pq,scope,next)))
 
   @staticmethod
-  def readMessagePart(dq,scope,next):
+  def readMessagePart(i,pq,scope,next):
+    log_this_func()
     assert socket
-    update_blocktime(scope)
     try:
       incoming_part = bytearray(scope.socket.recv(4096))
       scope.buf.extend(incoming_part)
-      sleep(scope.blocktime/1000)
     except socket.timeout:
       pass
-    dq.append(lambda: next())
+    if incoming_part:
+      pq.put(Priority.HIGH.value,lambda i: next(i))
+    else:
+      pq.put(i+Priority.PRECISION.value,lambda i: next(i))
 
   @staticmethod
-  def sendMessage(dq,scope,next):
+  def sendMessage(i,pq,scope,next):
+    log_this_func()
     assert(scope.socket)
     assert(scope.out_data)
     scope.bytes_sent = 0
-    Events.sendMessagePart(dq,scope,next)
+    Events.sendMessagePart(i,pq,scope,next)
 
   @staticmethod
-  def sendMessagePart(dq,scope,next):
+  def sendMessagePart(i,pq,scope,next):
+    log_this_func()
     scope.bytes_sent += scope.socket.send(scope.out_data)
-    if scope.bytes_sent != len(scope.out_data):
-      dq.append(lambda: Events.sendMessagePart(dq,scope,next))
+    if scope.bytes_sent == 0:
+      pq.put(i+Priority.PRECISION.value,lambda i: Events.sendMessagePart(i,pq,scope,next))
+    elif scope.bytes_sent != len(scope.out_data):
+      pq.put(i,lambda i: Events.sendMessagePart(i,pq,scope,next))
     else:
       scope.bytes_sent = 0
       scope.out_data = None
-      dq.append(lambda: next())
+      pq.put(Priority.HIGH.value,lambda i: next(i))
       
   @staticmethod
-  def checkHelloAndReply(dq,scope):
+  def checkHelloAndReply(i,pq,scope):
     log_this_func()
     assert(scope.msg_dict)
     msg_dict = scope.useMsg()
     if not msg_dict["MessageType"] == MessageType.HELLO_CLIENT:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Expected client greeting.",scope,
-                                                 lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Expected client greeting.",scope,
+                                                   lambda j: Events.die(j,pq,scope)))
       return
     log("Client reported version: %s" % msg_dict["Version"])
     if __version__ != msg_dict["Version"]:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Version mismatch.",scope,
-                                                 lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Version mismatch.",scope,
+                                                   lambda j: Events.die(j,pq,scope)))
       return
     scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)].build([__version__])
-    Events.sendMessage(dq,scope, lambda: Events.waitForNextMessage(dq,scope))
+    Events.sendMessage(i,pq,scope, lambda i: Events.waitForNextMessage(i,pq,scope))
 
   @staticmethod
-  def waitForNextMessage(dq,scope):
+  def waitForNextMessage(i,pq,scope):
     while len(scope.buf) >= _msg_size or scope.msg_dict:
       try:
         if not scope.msg_dict:
           scan_for_message_and_parse(scope)
       except BadMessageError:
-        dq.append(lambda: Events.replyErrorMessage(dq,"BadMessageError",scope,
-                                                 lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH,value,lambda i: Events.replyErrorMessage(i,pq,"BadMessageError",scope,
+                                                   lambda j: Events.die(j,pq,scope)))
         return
       msg_dict = scope.useMsg()
       msg_type = msg_dict["MessageType"]
@@ -185,86 +175,86 @@ class Events:
         scope.filename = msg_dict["File Name"]
         scope.curpart = 0
         scope.endpart = 0
-        dq.append(lambda: Events.pushFile(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.pushFile(i,pq,scope))
         return #No parallel dispatch
       elif msg_type == MessageType.PUSH_FILE:
         scope.filename = msg_dict["File Name"]
         scope.in_data = None
         scope.curpart = 0
         scope.endpart = msg_dict["EndPart"]
-        dq.append(lambda: Events.pullFile(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.pullFile(i,pq,scope))
         return #No parallel dispatch
       elif msg_type == MessageType.AUTH_SUBJECT:
         scope.target = msg_dict["Subject"]
         scope.salt = msg_dict["Salt"]
-        dq.append(lambda: Events.authenticate(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.authenticate(i,pq,scope))
         return
       elif msg_type == MessageType.LIST_SUBJECT_CLIENT:
-        dq.append(lambda: Events.listSubjects(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.listSubjects(i,pq,scope))
       elif msg_type == MessageType.LIST_OBJECT_CLIENT:
-        dq.append(lambda: Events.listObjects(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.listObjects(i,pq,scope))
       elif msg_type == MessageType.GIVE_TICKET_SUBJECT:
         scope.target = msg_dict["Subject"]
         try:
           scope.ticket = Ticket(msg_dict["Ticket"])
         except BadTicketError:
-          dq.append(lambda: Events.replyErrorMessage(dq,"BadTicketError",scope,
-                                                     lambda: Events.die(dq,scope)))
+          pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"BadTicketError",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
           return
-        dq.append(lambda: Events.giveTicket(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.giveTicket(i,pq,scope))
       elif msg_type == MessageType.TAKE_TICKET_SUBJECT:
         scope.target = msg_dict["Subject"]
         try:
           scope.ticket = Ticket(msg_dict["Ticket"])
         except BadTicketError:
-          dq.append(lambda: Events.replyErrorMessage(dq,"BadTicketError",scope,
-                                                     lambda: Events.die(dq,scope)))
+          pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"BadTicketError",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
           return
-        dq.append(lambda: Events.takeTicket(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.takeTicket(i,pq,scope))
       elif msg_type == MessageType.MAKE_DIRECTORY:
         scope.target = msg_dict["Directory"]
-        dq.append(lambda: Events.makeDirectory(dq.scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.makeDirectory(i,pq.scope))
       elif msg_type == MessageType.MAKE_SUBJECT:
         scope.target = msg_dict["Subject"]
         scope.t_password = msg_dict["Password"]
-        dq.append(lambda: Events.makeSubject(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.makeSubject(i,pq,scope))
       elif msg_type == MessageType.CD:
         scope.target = msg_dict["Path"]
-        dq.append(lambda: Events.changeDirectory(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.changeDirectory(i,pq,scope))
       elif msg_type == MessageType.MAKE_FILTER:
         scope.subject1 = msg_dict["Subject1"]
         scope.subject2 = msg_dict["Subject2"]
         try:
           scope.ticket = Ticket(msg_dict["Ticket"])
         except BadTicketError:
-          dq.append(lambda: Events.replyErrorMessage(dq,"BadTicketError",scope,
-                                                     lambda: Events.die(dq,scope)))
+          pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"BadTicketError",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
           return
-        dq.append(lambda: Events.makeFilter(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.makeFilter(i,pq,scope))
       elif msg_type == MessageType.MAKE_LINK:
         scope.subject1 = msg_dict["Subject1"]
         scope.subject2 = msg_dict["Subject2"]
-        dq.append(lambda: Events.makeLink(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.makeLink(i,pq,scope))
       elif msg_type == MessageType.DELETE_FILE:
         scope.filename = msg_dict["File Name"]
-        dq.append(lambda: Events.deleteFile(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.deleteFile(i,pq,scope))
       elif msg_type == MessageType.CLEAR_FILTERS:
         scope.target = msg_dict["Subject"]
-        dq.append(lambda: Events.clearFilters(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.clearFilters(i,pq,scope))
       elif msg_type == MessageType.CLEAR_LINKS:
         scope.target = msg_dict["Subject"]
-        dq.append(lambda: Events.clearLinks(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.clearLinks(i,pq,scope))
       elif msg_type == MessageType.DELETE_SUBJECT:
         scope.target = msg_dict["Subject"]
-        dq.append(lambda: Events.deleteSubject(dq,scope))
+        pq.put(Priority.HIGH.value,lambda i: Events.deleteSubject(i,pq,scope))
       else:
-         dq.append(lambda: Events.replyErrorMessage(dq,"Unexpected message type",scope,
-                                                     lambda: Events.die(dq,scope)))
-    dq.append(lambda: Events.readUntilMessageEnd(dq,scope,
-	lambda: Events.waitForNextMessage(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Unexpected message type",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
+    pq.put(i,lambda i: Events.readUntilMessageEnd(i,pq,scope,
+	lambda j: Events.waitForNextMessage(j,pq,scope)))
 
   @staticmethod
-  def pushFile(dq,scope):
+  def pushFile(i,pq,scope):
     log_this_func()
     assert scope.filename
     assert scope.curpart == 0
@@ -273,20 +263,21 @@ class Events:
     localpath = os.path.join(scope.cd,scope.filename)
     try:
       if not db.getObject(localpath):
-        dq.append(lambda: Events.replyErrorMessage(dq,"Object does not exist in database",scope,
-                                                 lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,
+                                                 "Object does not exist in database",scope,
+                                                 lambda j: Events.die(j,pq,scope)))
         return
       scope.fd = db.readObject(localpath)
     except DatabaseError as e:
-      dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
-                                                     lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,str(e),scope,
+                                                     lambda j: Events.die(j,pq,scope)))
       return
     except IOError:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Error reading file",scope,
-                                                 lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Error reading file",scope,
+                                                 lambda j: Events.die(j,pq,scope)))
       return
     log("Opened '{}' for reading".format(localpath))
-    dq.append(lambda: Events.sendFilePart(dq,scope))
+    pq.put(Priority.HIGH.value,lambda i: Events.sendFilePart(i,pq,scope))
 
   @staticmethod
   def pullFile(dq,scope):
@@ -296,30 +287,30 @@ class Events:
     assert scope.endpart
     assert scope.stream
     if scope.curpart != 0:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Push must start at zero.",scope,
-                                                 lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Push must start at zero.",scope,
+                                                 lambda j: Events.die(j,pq,scope)))
     elif scope.endpart <= 0:
-      dq.append(lambda: Events.replyErrorMessage(dq,"File must have a block.",scope,
-                                                 lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"File must have a block.",scope,
+                                                 lambda j: Events.die(j,pq,scope)))
     else:
       localpath = os.path.join(scope.cd,scope.filename)
       try:
         if db.getObject(localpath):
-          dq.append(lambda: Events.replyErrorMessage(dq,"Object already exists in database",scope,
-                                                 lambda: Events.die(dq,scope)))
+          pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(
+            i,pq,"Object already exists in database",scope,lambda j: Events.die(i,pq,scope)))
           return
         db.insertObject(localpath)
         scope.fd = db.writeObject(localpath)
       except DatabaseError as e:
-        dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
-                                                     lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,str(e),scope,
+                                                     lambda j: Events.die(j,pq,scope)))
         return
       except IOError:
-        dq.append(lambda: Events.replyErrorMessage(dq,"Error writing file",scope,
-                                                     lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Error writing file",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
         return
       log("Opened '{}' for writing after object insertion".format(localpath))
-      dq.append(lambda: Events.pullFilePart(dq,scope))
+      pq.put(Priority.HIGH.value,lambda i: Events.pullFilePart(i,pq,scope))
 
   @staticmethod
   def pullFilePart(dq,scope):
@@ -333,12 +324,12 @@ class Events:
       try:
         scope.fd.write(scope.in_data)
       except IOError:
-        dq.append(lambda: Events.replyErrorMessage(dq,"Error writing file",scope,
-                                                     lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Error writing file",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
       return
     else:
-      dq.append(lambda: Events.readUntilMessageEnd(dq, scope,
-                    lambda: Events.unpackMsgToPullFilePart(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.readUntilMessageEnd(i,pq, scope,
+                    lambda j: Events.unpackMsgToPullFilePart(j,pq,scope)))
       return
     if scope.curpart == scope.endpart:
       scope.curpart = 0
@@ -348,29 +339,29 @@ class Events:
       scope.fd = None
       scope.in_data = None
       log("All file parts have been recorded.")
-      dq.append(lambda: Events.waitForNextMessage(dq,scope))
+      pq.put(Priority.HIGH.value,lambda i: Events.waitForNextMessage(i,pq,scope))
     else:
-      dq.append(lambda: Events.readUntilMessageEnd(dq, scope,
-                    lambda: Events.unpackMsgToPullFilePart(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.readUntilMessageEnd(i,pq, scope,
+                    lambda j: Events.unpackMsgToPullFilePart(j,pq,scope)))
 
   @staticmethod
-  def unpackMsgToPullFilePart(dq,scope):
+  def unpackMsgToPullFilePart(i,pq,scope):
     msg_dict = scope.useMsg()
     if msg_dict["MessageType"] != MessageType.XFER_FILE:
-      dq.append(lambda: Events.replyErrorMessage(dq,"Bad message sequence",scope,
-                                                     lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Bad message sequence",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
     else:
       scope.in_data = msg_dict["Data"][0:msg_dict["BSize"]]
       next_curpart = msg_dict["CurPart"]
       if next_curpart != scope.curpart:
-        dq.append(lambda: Events.replyErrorMessage(dq,"Bad message sequence",scope,
-                                                     lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Bad message sequence",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
         return
       scope.curpart += 1
-      dq.append(lambda: Events.pullFilePart(dq,scope))
+      pq.put(Priority.HIGH.value,lambda i: Events.pullFilePart(i,pq,scope))
 
   @staticmethod
-  def sendFilePart(dq,scope):
+  def sendFilePart(i,pq,scope):
     log_this_func()
     assert scope.filename
     assert scope.fd
@@ -384,21 +375,21 @@ class Events:
       scope.fd.close()
       scope.fd = None
       log("All file parts have been sent.")
-      dq.append(lambda: Events.waitForNextMessage(dq,scope))
+      pq.put(Priority.HIGH.value,lambda i: Events.waitForNextMessage(i,pq,scope))
     else:
       try:
         data = scope.fd.read(_data_size)
       except IOError:
-        dq.append(lambda: Events.replyErrorMessage(dq,"Error reading file",scope,
-                                                     lambda: Events.die(dq,scope)))
+        pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"Error reading file",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
         return
       scope.out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build([
         data,scope.curpart,len(data)],scope.stream,scope.hmacf)
       scope.curpart += 1
-      Events.sendMessage(dq,scope,lambda: Events.sendFilePart(dq,scope))
+      Events.sendMessage(Priority.HIGH,pq,scope,lambda j: Events.sendFilePart(j,pq,scope))
 
   @staticmethod
-  def authenticate(dq,scope):
+  def authenticate(i,pq,scope):
     assert(scope.target)
     assert(scope.salt)
     try:
@@ -416,16 +407,16 @@ class Events:
         scope.key = None
         scope.stream = None
         scope.hmacf = None
-      Events.sendMessage(dq,scope,lambda: Events.waitForNextMessage(dq,scope))
+      Events.sendMessage(Priority.HIGH,pq,scope,lambda j: Events.waitForNextMessage(j,pq,scope))
     except DatabaseError as e:
-      dq.append(lambda: Events.replyErrorMessage(dq,str(e),scope,
-                                                     lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,str(e),scope,
+                                                     lambda j: Events.die(j,pq,scope)))
     except BadMessageError:
-      dq.append(lambda: Events.replyErrorMessage(dq,"BadMessageError",scope,
-                                                     lambda: Events.die(dq,scope)))
+      pq.put(Priority.HIGH.value,lambda i: Events.replyErrorMessage(i,pq,"BadMessageError",scope,
+                                                     lambda j: Events.die(j,pq,scope)))
       
   @staticmethod
-  def replyErrorMessage(dq,message,scope,next):
+  def replyErrorMessage(i,pq,message,scope,next):
     log_this_func()
     log("Sent error message: %s" % message)
     if scope.stream:
@@ -433,14 +424,17 @@ class Events:
                                                                       scope.stream,scope.hmacf)
     else:
       scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.ERROR_SERVER)].build(message)
-    Events.sendMessage(dq,scope,lambda: next())
+    Events.sendMessage(Priority.HIGH.value,pq,scope,lambda i: next(i))
 
   @staticmethod
-  def die(dq,scope):
+  def die(i,pq,scope):
     log_this_func()
     if scope.stream:
       scope.out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.DIE)].build()
     else:
       scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.DIE)].build()
-    Events.sendMessage(dq,scope,lambda: scope.socket.close())
+    Events.sendMessage(Priority.HIGH,pq,scope,lambda i: scope.socket.close())
 
+  @staticmethod
+  def idle(i,pq):
+    pq.put(Priority.IDLE.value,lambda i: Events.idle(i,pq))
