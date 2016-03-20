@@ -3,6 +3,7 @@ from SPM.Util import log
 
 from time import sleep
 import os
+import errno
 import inspect
 import socket
 import hashlib
@@ -88,7 +89,6 @@ class Events:
 
   @staticmethod
   def readUntilMessageEnd(i,pq,scope,next):
-    log_this_func()
     if scope.buf:
       try:
         scan_for_message_and_parse(scope)
@@ -105,21 +105,23 @@ class Events:
 
   @staticmethod
   def readMessagePart(i,pq,scope,next):
-    log_this_func()
     assert socket
     try:
       incoming_part = bytearray(scope.socket.recv(4096))
       scope.buf.extend(incoming_part)
-    except socket.timeout:
-      pass
-    if incoming_part:
-      pq.put(Priority.HIGH.value,lambda i: next(i))
-    else:
+    except BlockingIOError:
       pq.put(i+Priority.PRECISION.value,lambda i: next(i))
+      return
+    except IOError:
+      try:
+        scope.socket.close()
+      except IOError:
+        pass
+      return #Assume socket closed
+    pq.put(Priority.HIGH.value,lambda i: next(i))
 
   @staticmethod
   def sendMessage(i,pq,scope,next):
-    log_this_func()
     assert(scope.socket)
     assert(scope.out_data)
     scope.bytes_sent = 0
@@ -127,16 +129,23 @@ class Events:
 
   @staticmethod
   def sendMessagePart(i,pq,scope,next):
-    log_this_func()
-    scope.bytes_sent += scope.socket.send(scope.out_data)
-    if scope.bytes_sent == 0:
+    try:
+      scope.bytes_sent += scope.socket.send(scope.out_data)
+    except BlockingIOError:
       pq.put(i+Priority.PRECISION.value,lambda i: Events.sendMessagePart(i,pq,scope,next))
-    elif scope.bytes_sent != len(scope.out_data):
-      pq.put(i,lambda i: Events.sendMessagePart(i,pq,scope,next))
+    except IOError:
+      try:
+        scope.socket.close()
+      except IOError:
+        pass  
+      return #Assume socket closed
     else:
-      scope.bytes_sent = 0
-      scope.out_data = None
-      pq.put(Priority.HIGH.value,lambda i: next(i))
+      if scope.bytes_sent != len(scope.out_data):
+        pq.put(i,lambda i: Events.sendMessagePart(i,pq,scope,next))
+      else:
+        scope.bytes_sent = 0
+        scope.out_data = None
+        pq.put(Priority.HIGH.value,lambda i: next(i))
       
   @staticmethod
   def checkHelloAndReply(i,pq,scope):
