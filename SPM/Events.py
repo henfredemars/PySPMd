@@ -79,6 +79,7 @@ class Events:
   @staticmethod
   def acceptClient(i,pq,socket):
     log_this_func()
+    socket.setblocking(False)
     addr = socket.getpeername()
     print("Accepted connection from %s:%i" % addr)
     scope = ClientData(socket)

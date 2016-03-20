@@ -14,7 +14,7 @@ class Priority(Enum):
   IDLE = 500
   HIGH = 0
   SPIN_TIME = 1
-  PRECISION = 10
+  PRECISION = 5
 
 class PriorityQueue:
 
