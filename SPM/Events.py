@@ -1,8 +1,6 @@
 from . import __version__, _msg_size, _hash_rounds, _data_size
 from SPM.Util import log
 
-from time import time as time_sec
-from time import sleep
 import os
 import inspect
 import socket
@@ -13,6 +11,7 @@ from SPM.Messages import BadMessageError
 from SPM.Database import DatabaseError
 from SPM.Tickets import Ticket, BadTicketError
 from SPM.Stream import RC4, make_hmacf
+from SPM.Status import Status
 
 strategies = MessageStrategy.strategies
 db = None #Worker thread must initialize this to Database() because
@@ -23,6 +22,8 @@ db = None #Worker thread must initialize this to Database() because
 class ClientData:
   
   def __init__(self,socket):
+    self.status = Status.RUN      #Client execution status
+    self.resume = None
     self.socket = socket          #Client communication socket
     self.msg_dict = None          #Client msg about to be dispatched
     self.buf = bytearray()        #Recv buffer for client messages
@@ -36,8 +37,6 @@ class ClientData:
     self.key = None               #Encryption key
     self.hmacf = None             #Message signing function
     self.stream = None            #Keystream generator object
-    self.lastreadtime = None      #Last attempt to read from socket
-    self.blocktime = 0            #Time to sleep after reading empty socket
     self.filename = None          #File name
     self.fd = None                #Open file discriptor
     self.in_data = None           #Incoming data block
@@ -55,34 +54,6 @@ class ClientData:
 
 #Utility functions (for code readability), time units are in ms
 log_this_func = lambda: log(inspect.stack()[1][3])
-time = lambda: time_sec()*1000
-
-#Set first lastreadtime to a resonable value
-def init_lastreadtime(scope):
-  if scope.lastreadtime is None:
-    scope.lastreadtime = time()
-
-#Measure time we last tried to read from the socket and block if no data to keep the time
-#  for an event to pass through the queue near target_depth ms. If the server starts
-#  getting busy, we quickly back off. Ultimately the server becomes non-blocking when
-#  the queue is busy. When idle, the server slowly increments the socket block time until
-#  the queue is once again target_depth ms long, spending most of its time blocked on
-#  the socket, waiting for data
-#
-#This is done to avoid spinning on the non-blocking socket when there is nothing to do but
-#  check for incoming data (in this case we will soon block a long time), while not blocking
-#  when the server is fully loaded (in this case we quickly handle the check socket event
-#  to move on with more pressing matters...)
-def update_blocktime(scope):
-  init_lastreadtime(scope)
-  ct = time()
-  scope.blocktime = next_block_time(scope.blocktime,ct-scope.lastreadtime)
-  scope.lastreadtime = ct
-
-def next_block_time(last_time,call_delta,target_depth=500,precision=10):
-  if call_delta > target_depth:
-    return last_time//2
-  return last_time+precision
 
 def scan_for_message_and_parse(scope):
   if scope.msg_dict:
@@ -94,11 +65,11 @@ def scan_for_message_and_parse(scope):
 class Events:
 
   @staticmethod
-  def acceptClient(dq,socket):
+  def acceptClient(dq,scope):
     log_this_func()
-    addr = socket.getpeername()
+    scope.socket.setblocking(False)
+    addr = scope.socket.getpeername()
     print("Accepted connection from %s:%i" % addr)
-    scope = ClientData(socket)
     dq.append(lambda: Events.readUntilMessageEnd(dq,scope,
 	lambda: Events.checkHelloAndReply(dq,scope)))
 
@@ -121,13 +92,19 @@ class Events:
   @staticmethod
   def readMessagePart(dq,scope,next):
     assert socket
-    update_blocktime(scope)
     try:
       incoming_part = bytearray(scope.socket.recv(4096))
       scope.buf.extend(incoming_part)
-      sleep(scope.blocktime/1000)
-    except socket.timeout:
-      pass
+    except BlockingIOError:
+      scope.status = Status.BLOCKED_RECV
+      scope.resume = lambda: Events.readMessagePart(dq,scope,next)
+      return
+    except IOError:
+      scope.status = Status.DYING
+      return
+    except Exception:
+      scope.status = Status.DYING
+      raise
     dq.append(lambda: next())
 
   @staticmethod
@@ -139,7 +116,18 @@ class Events:
 
   @staticmethod
   def sendMessagePart(dq,scope,next):
-    scope.bytes_sent += scope.socket.send(scope.out_data)
+    try:
+      scope.bytes_sent += scope.socket.send(scope.out_data)
+    except BlockingIOError:
+      scope.status = Status.BLOCKED_SEND
+      scope.resume = lambda: Events.readMessagePart(dq,scope,next)
+      return
+    except IOError:
+      scope.status = Status.DYING
+      return      
+    except Exception:
+      scope.status = Status.DYING
+      raise
     if scope.bytes_sent != len(scope.out_data):
       dq.append(lambda: Events.sendMessagePart(dq,scope,next))
     else:
@@ -179,7 +167,7 @@ class Events:
       log(str(msg_type))
       #Switch on all possible messages
       if msg_type == MessageType.DIE:
-        scope.socket.close()
+        Events.markDyingAndClose(dq,scope)
         return #No parallel dispatch
       elif msg_type == MessageType.PULL_FILE:
         scope.filename = msg_dict["File Name"]
@@ -442,5 +430,9 @@ class Events:
       scope.out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.DIE)].build()
     else:
       scope.out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.DIE)].build()
-    Events.sendMessage(dq,scope,lambda: scope.socket.close())
+    Events.sendMessage(dq,scope,lambda: Events.markDyingAndClose(dq,scope))
 
+  @staticmethod
+  def markDyingAndClose(dq,scope):
+    scope.status = Status.DYING
+    scope.socket.close()
