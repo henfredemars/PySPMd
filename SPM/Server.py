@@ -1,41 +1,89 @@
 import socket
+from select import select
 
 from SPM.Database import Database
 from SPM.Util import log
+from SPM.Events import ClientData
+from SPM.Status import Status
 import SPM.Events as EventServices
 
 from collections import deque
-from threading import Thread
+from threading import Thread, Condition
 from time import sleep
 
 #Server
 
 class Server():
 
-  def __init__(self,bind,port,idlepoll=700):
+  def __init__(self,bind,port):
     self.port = port
     self.bind = bind
-    self.idlepoll = idlepoll
+    self.scopes_avail = Condition()
     self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self.socket.bind((bind,port))
     self.socket.listen(32)
     self.dq = deque()
+    self.scopes = []
     self.worker = Thread(target = self.workerDispatch, daemon = True)
+
+  def getScopesStatus(self,status):
+    scopes = []
+    for scope in self.scopes:
+      if scope.status == status:
+        scopes.append(scope)
+    return scopes
+
+  def reapDeadScopes(self):
+    dead = []
+    with self.scopes_avail:
+      for scope in self.scopes:
+        if scope.status == Status.DYING or scope.socket.fileno() < 0:
+          dead.append(scope)
+    if dead:
+      self.scopes = [scope for scope in self.scopes if scope not in dead]
+
+  def blockOnBlockedScopes(self):
+    blocked_send = self.getScopesStatus(Status.BLOCKED_SEND)
+    blocked_recv = self.getScopesStatus(Status.BLOCKED_RECV)
+    blocked_send_s = tuple(map(lambda s:s.socket,blocked_send))
+    blocked_recv_s = tuple(map(lambda s:s.socket,blocked_recv))
+    if not blocked_send_s and not blocked_recv_s:
+      return
+    _ = select(blocked_recv_s,blocked_send_s,[])
+
+  def wakeUpBlockedScopes(self):
+    blocked_send = self.getScopesStatus(Status.BLOCKED_SEND)
+    blocked_recv = self.getScopesStatus(Status.BLOCKED_RECV)
+    blocked_send_s = map(lambda s:s.socket,blocked_send)
+    blocked_recv_s = map(lambda s:s.socket,blocked_recv)
+    wake,rw,_ = select(blocked_recv_s,blocked_send_s,[],False)
+    wake.extend(rw)
+    wake = [scope for socket in wake for scope in self.scopes if scope.socket==socket]
+    for scope in wake:
+      scope.status = Status.RUN
+      resume_func = scope.resume
+      scope.resume = None
+      resume_func()
 
   def workerDispatch(self):
     EventServices.db = Database()
     while True:
-      task = None
       try:
-        task = self.dq.popleft()
-      except IndexError:
-        sleep(self.idlepoll/1000)
-        continue
-      try:
-        task()
-      except IOError as e:
-        log("IOError: %s" % str(e))
-        continue
+        task = None
+        try:
+          task = self.dq.popleft()
+        except IndexError:
+          with self.scopes_avail:
+            while not self.scopes:
+              self.scopes_avail.wait()
+            self.reapDeadScopes()
+            self.blockOnBlockedScopes()
+            self.wakeUpBlockedScopes()
+        else:
+          task()
+      except Exception as e:
+        log("Caught (Otherwise) Fatal Exception: %s" % str(e))
+        raise
 
   def mainloop(self):
     log("Dispatching worker...")
@@ -43,5 +91,9 @@ class Server():
     log("Entering main loop...")
     while True:
       (socket,addr) = self.socket.accept()
-      self.dq.append(lambda: EventServices.Events.acceptClient(self.dq,socket))
+      scope = ClientData(socket)
+      with self.scopes_avail:
+        self.scopes.append(scope)
+        self.scopes_avail.notify()
+      self.dq.append(lambda: EventServices.Events.acceptClient(self.dq,scope))
 
