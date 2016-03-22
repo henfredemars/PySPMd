@@ -23,12 +23,13 @@ class Server():
     self.socket.bind((bind,port))
     self.socket.listen(32)
     self.dq = deque()
-    self.scopes = []
+    self.scopes = dict()
     self.worker = Thread(target = self.workerDispatch, daemon = True)
 
   def getScopesStatus(self,status):
     scopes = []
-    for scope in self.scopes:
+    for fileno in self.scopes:
+      scope = self.scopes[fileno]
       if scope.status == status:
         scopes.append(scope)
     return scopes
@@ -36,11 +37,13 @@ class Server():
   def reapDeadScopes(self):
     dead = []
     with self.scopes_avail:
-      for scope in self.scopes:
+      for fileno in self.scopes:
+        scope = self.scopes[fileno]
         if scope.status == Status.DYING or scope.socket.fileno() < 0:
           dead.append(scope)
     if dead:
-      self.scopes = [scope for scope in self.scopes if scope not in dead]
+      for fileno in dead:
+        del self.scopes[fileno]
 
   def blockOnBlockedScopes(self):
     blocked_send = self.getScopesStatus(Status.BLOCKED_SEND)
@@ -58,7 +61,7 @@ class Server():
     blocked_recv_s = map(lambda s:s.socket,blocked_recv)
     wake,rw,_ = select(blocked_recv_s,blocked_send_s,[],False)
     wake.extend(rw)
-    wake = [scope for socket in wake for scope in self.scopes if scope.socket==socket]
+    wake = [self.scopes[socket.fileno()] for socket in wake]
     for scope in wake:
       scope.status = Status.RUN
       resume_func = scope.resume
@@ -93,7 +96,7 @@ class Server():
       (socket,addr) = self.socket.accept()
       scope = ClientData(socket)
       with self.scopes_avail:
-        self.scopes.append(scope)
+        self.scopes[socket.fileno()] = scope
         self.scopes_avail.notify()
       self.dq.append(lambda: EventServices.Events.acceptClient(self.dq,scope))
 
