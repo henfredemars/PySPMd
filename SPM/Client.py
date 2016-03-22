@@ -103,7 +103,6 @@ class Client():
         data = fd.read(_data_size)
         self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build(
           [data,curpart,len(data)],self.stream,self.hmacf))
-        
 
   def resetConnection(self):
     self.stream = None
