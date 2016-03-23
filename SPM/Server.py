@@ -16,9 +16,15 @@ class Server():
     self.port = port
     self.bind = bind
     self.loop = asyncio.get_event_loop()
-    self.loop.run_until_complete(self.loop.create_server(
+    self.server = self.loop.run_until_complete(self.loop.create_server(
 		lambda: SPM.Protocol.Protocol(self.loop),self.bind,self.port))
 
   def mainloop(self):
     log("Entering the event loop...")
-    self.loop.run_forever()
+    try:
+      self.loop.run_forever()
+    finally:
+      self.server.close()
+      self.loop.run_until_complete(self.server.wait_closed())
+      self.loop.close()
+
