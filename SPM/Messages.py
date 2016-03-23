@@ -38,64 +38,66 @@ class MessageType(Enum):
   PULL_FILE             = TypeInfo(bytes([3]),"!{}s".format(_file_size),("File Name",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  PUSH_FILE             = TypeInfo(bytes([4]),"!{}sQ".format(_file_size),("File Name","EndPart"),
+  PUSH_FILE             = TypeInfo(bytes([4]),"!{}sQ".format(_file_size),("File Name",),
                             Codec(lambda a: (utf_enc(a[0]),int(a[1])),
                                   lambda a: (utf_dec(a[0]),int(a[1]))))
-  XFER_FILE             = TypeInfo(bytes([4]),"!{}sQH".format(_data_size),("Data","CurPart","BSize"),
-                            Codec(lambda a: (bytes(a[0]),int(a[1]),int(a[2])),
-                                  lambda a: (bytes(a[0]),int(a[1]),int(a[2]))))
-  ERROR_SERVER          = TypeInfo(bytes([5]),"!{}s".format(_error_msg_size),("Error Message",),
+  XFER_FILE             = TypeInfo(bytes([5]),"!{}sQH".format(_data_size),("Data","BSize"),
+                            Codec(lambda a: (bytes(a[0]),int(a[1])),
+                                  lambda a: (bytes(a[0]),int(a[1]))))
+  TASK_DONE		= TypeInfo(bytes([6]),None,None,
+                            Codec(None,None))
+  ERROR_SERVER          = TypeInfo(bytes([7]),"!{}s".format(_error_msg_size),("Error Message",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  AUTH_SUBJECT          = TypeInfo(bytes([6]),"!{}s{}s".format(_subject_size,_salt_size),("Subject","Salt"),
+  AUTH_SUBJECT          = TypeInfo(bytes([8]),"!{}s{}s".format(_subject_size,_salt_size),("Subject","Salt"),
                             Codec(lambda a: (utf_enc(a[0]),bytes(a[1])),
                                   lambda a: (utf_dec(a[0]),bytes(a[1]))))
-  CONFIRM_AUTH          = TypeInfo(bytes([7]),"!{}s".format(_subject_size),("Subject",),
+  CONFIRM_AUTH          = TypeInfo(bytes([9]),"!{}s".format(_subject_size),("Subject",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  REJECT_AUTH           = TypeInfo(bytes([8]),None,None,
+  REJECT_AUTH           = TypeInfo(bytes([10]),None,None,
                             Codec(None,None))
-  LIST_SUBJECT_CLIENT   = TypeInfo(bytes([9]),None,None,
+  LIST_SUBJECT_CLIENT   = TypeInfo(bytes([11]),None,None,
                             Codec(None,None))
-  LIST_SUBJECT_SERVER   = TypeInfo(bytes([10]),("!{}s".format(_subject_size))*31,("Subject",)*31,
+  LIST_SUBJECT_SERVER   = TypeInfo(bytes([12]),("!{}s".format(_subject_size))*31,("Subject",)*31,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  LIST_OBJECT_CLIENT    = TypeInfo(bytes([11]),None,None,
+  LIST_OBJECT_CLIENT    = TypeInfo(bytes([13]),None,None,
                             Codec(None,None))
-  LIST_OBJECT_SERVER    = TypeInfo(bytes([12]),("!{}s".format(_file_size))*7,("File",)*7,
+  LIST_OBJECT_SERVER    = TypeInfo(bytes([14]),("!{}s".format(_file_size))*7,("File",)*7,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  GIVE_TICKET_SUBJECT   = TypeInfo(bytes([13]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
+  GIVE_TICKET_SUBJECT   = TypeInfo(bytes([15]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  TAKE_TICKET_SUBJECT   = TypeInfo(bytes([14]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
+  TAKE_TICKET_SUBJECT   = TypeInfo(bytes([16]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_DIRECTORY        = TypeInfo(bytes([15]),"!{}s".format(_file_size),("Directory"),
+  MAKE_DIRECTORY        = TypeInfo(bytes([17]),"!{}s".format(_file_size),("Directory"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_SUBJECT          = TypeInfo(bytes([16]),"!{}s{}s".format(_subject_size,_password_size),("Subject","Password"),
+  MAKE_SUBJECT          = TypeInfo(bytes([18]),"!{}s{}s".format(_subject_size,_password_size),("Subject","Password"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  CD                    = TypeInfo(bytes([17]),"!{}s".format(_file_size),("Path",),
+  CD                    = TypeInfo(bytes([19]),"!{}s".format(_file_size),("Path",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_FILTER           = TypeInfo(bytes([18]),"!{0}s{0}s{1}s".format(_subject_size,_ticket_size),("Subject1","Subject2","Ticket"),
+  MAKE_FILTER           = TypeInfo(bytes([20]),"!{0}s{0}s{1}s".format(_subject_size,_ticket_size),("Subject1","Subject2","Ticket"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_LINK             = TypeInfo(bytes([19]),"!{0}s{0}s".format(_subject_size),("Subject1","Subject2"),
+  MAKE_LINK             = TypeInfo(bytes([21]),"!{0}s{0}s".format(_subject_size),("Subject1","Subject2"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  DELETE_FILE           = TypeInfo(bytes([20]),"!{}s".format(_file_size),("File Name",),
+  DELETE_FILE           = TypeInfo(bytes([22]),"!{}s".format(_file_size),("File Name",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  CLEAR_FILTERS         = TypeInfo(bytes([21]),"!{}s".format(_subject_size),("Subject",),
+  CLEAR_FILTERS         = TypeInfo(bytes([23]),"!{}s".format(_subject_size),("Subject",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  CLEAR_LINKS           = TypeInfo(bytes([22]),"!{}s".format(_subject_size),("Subject",),
+  CLEAR_LINKS           = TypeInfo(bytes([24]),"!{}s".format(_subject_size),("Subject",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  DELETE_SUBJECT        = TypeInfo(bytes([23]),"!{}s".format(_subject_size),("Subject",),
+  DELETE_SUBJECT        = TypeInfo(bytes([25]),"!{}s".format(_subject_size),("Subject",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
 
@@ -206,6 +208,7 @@ MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.AUTH_SUBJECT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PULL_FILE)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.REJECT_AUTH)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_CLIENT)
