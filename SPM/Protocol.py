@@ -30,18 +30,18 @@ class Protocol(asyncio.Protocol):
     self.hmacf = None
     self.fd = None
     self.cd = "/"
-    self.write_enable = True
+    self.write_lock = asyncio.Lock()
 
   def pause_writing(self):
-    self.write_enable = False
+    self.loop.create_task(self.write_enable.acquire())
 
   def resume_writing(self):
-    self.write_enable = True
+    self.write_enable.release()
 
   async def sendall(self,data):
-    while not self.write_enable:
-      await asyncio.sleep(0.1)
+    await self.write_lock.acquire()
     self.transport.write(data)
+    self.write_lock.release()
 
   def connection_made(self,transport):
     self.transport = transport
