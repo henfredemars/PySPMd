@@ -14,7 +14,7 @@ _salt_size = 32
 _file_size = 256
 _data_size = (_msg_size-(2+2+_hash_size))
 _error_msg_size = 2048
-_hash_rounds = 2**14
+_hash_rounds = 2**4
 _debug = True
 _debug_width = 300
 
