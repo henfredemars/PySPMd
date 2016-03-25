@@ -7,7 +7,7 @@ __version__ = 0
 _hash_size = 20
 _ticket_size = 3
 
-_login_delay = 3
+_base_login_delay = 3
 _msg_size = 2048
 _subject_size = 64
 _password_size = 64

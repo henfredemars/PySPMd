@@ -1,9 +1,11 @@
 
 import asyncio
 import hashlib
+import random
 import os
 
-from . import __version__, _msg_size, _hash_rounds, _data_size, _login_delay, _lss_count
+from . import __version__, _msg_size, _hash_rounds, _data_size
+from . import _base_login_delay, _lss_count, _ls_count
 from SPM.Util import log, chunks
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType
@@ -92,7 +94,7 @@ class Protocol(asyncio.Protocol):
     elif msg_type == MessageType.AUTH_SUBJECT:
       target = msg_dict["Subject"]
       salt = msg_dict["Salt"]
-      await asyncio.sleep(_login_delay)
+      await asyncio.sleep(_base_login_delay + random.random())
       try:
         target_entry = db.getSubject(target)
         if target_entry:
@@ -178,7 +180,18 @@ class Protocol(asyncio.Protocol):
         await self.sendall(msg_block)
       await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
                                 None,self.stream,self.hmacf))
-      print("sent subjects")
+    elif msg_type == MessageType.LIST_OBJECT_CLIENT:
+      objects = db.getObjectNames(self.cd)
+      s_lists = chunks(objects,_ls_count)
+      for list in s_lists:
+        while len(list) < _ls_count:
+          list.append("")
+      msgs = map(lambda s_list: strategies[(MessageClass.PRIVATE_MSG,MessageType.LIST_OBJECT_SERVER)]
+                 .build(s_list,self.stream,self.hmacf),s_lists)
+      for msg_block in msgs:
+        await self.sendall(msg_block)
+      await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
+                                None,self.stream,self.hmacf))
     else:
       await self.sendError("Unexpected message type")
 

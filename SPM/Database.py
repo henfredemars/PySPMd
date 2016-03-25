@@ -67,10 +67,9 @@ class Database:
   def getSubjectNames(self):
     subjects = []
     for subject in self.c.execute("select subject from subjects order by subject"):
-      subjects.append(subject)
+      subjects.append(subject[0])
     return subjects
     
-
   def deleteSubject(self,name):
     if not name:
       raise DatabaseError("Cannot delete subject without a name.")
@@ -236,6 +235,18 @@ class Database:
     if t:
       return t[0]
     return None
+
+  def getObjectNames(self,cd):
+    if not cd:
+      raise DatabaseError("A current directory is required.")
+    if cd[0] != "/":
+      raise DatabaseError("The path is invalid.")
+    cd_e = cd.replace("_","\\_").replace("%","\\%") + "%"
+    objects = []
+    for object in self.c.execute("select localpath from objects where localpath like ? escape ?",(cd_e,"\\")):
+      if len(object[0].split(os.sep)) == len(cd.split(os.sep)):
+        objects.append(object[0])
+    return objects                                 
 
   def readObject(self,localpath):
     if not localpath:

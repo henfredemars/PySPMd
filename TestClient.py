@@ -22,7 +22,7 @@ def main():
   client.greetServer()
   client.authenticate("admin","password")
   subjects = client.listSubjects()
-  print("List of subjects:\n")
+  print("Subjects:")
   list(map(lambda subject: print(subject), subjects))
   print("Sending file...")
   client.sendFile("test.bin","test.bin")
@@ -31,6 +31,9 @@ def main():
   client.getFile("test.bin","test.bin")
   result_md5 = md5_file("test.bin")
   assert result_md5 == test_md5
+  print("Objects:")
+  for object in client.listObjects():
+    print(object)
   print("Signing out...")
   client.leaveServer()
 
