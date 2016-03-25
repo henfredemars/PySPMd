@@ -7,13 +7,14 @@ __version__ = 0
 _hash_size = 20
 _ticket_size = 3
 
+_login_delay = 3
 _msg_size = 2048
 _subject_size = 64
 _password_size = 64
 _salt_size = 32
 _file_size = 256
 _data_size = (_msg_size-(2+2+_hash_size))
-_error_msg_size = 2048
+_error_msg_size = (_msg_size-(2+_hash_size))
 _hash_rounds = 2**4
 _debug = True
 _debug_width = 300

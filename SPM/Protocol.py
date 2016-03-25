@@ -3,7 +3,7 @@ import asyncio
 import hashlib
 import os
 
-from . import __version__, _msg_size, _hash_rounds, _data_size
+from . import __version__, _msg_size, _hash_rounds, _data_size, _login_delay
 from SPM.Util import log
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType
@@ -43,6 +43,17 @@ class Protocol(asyncio.Protocol):
     self.transport.write(data)
     self.write_lock.release()
 
+  async def sendError(self,msg):
+    if self.stream:
+      msg = strategies[(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)].build(
+                            [msg],self.stream,self.hmacf)
+    else:
+      msg = strategies[(MessageClass.PUBLIC_MSG,MessageType.ERROR_SERVER)].build([msg])
+    try:
+      await self.sendall(msg)
+    except IOError:
+      pass
+
   def connection_made(self,transport):
     self.transport = transport
     self.transport.set_write_buffer_limits(500000,0)
@@ -65,14 +76,14 @@ class Protocol(asyncio.Protocol):
     try:
       msg_dict = MessageStrategy.parse(msg_block,self.stream,self.hmacf)
     except BadMessageError:
-      self.sendError("BadMessageError")
+      await self.sendError("BadMessageError")
       return
     msg_type = msg_dict["MessageType"]
     log(str(msg_type))
     if msg_type == MessageType.HELLO_CLIENT:
       log("Client reported version: %s" % msg_dict["Version"])
       if __version__ != msg_dict["Version"]:
-        self.sendError("Version Mismatch")
+        await self.sendError("Version Mismatch")
         return
       out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)].build([__version__])
       await self.sendall(out_data)
@@ -81,6 +92,7 @@ class Protocol(asyncio.Protocol):
     elif msg_type == MessageType.AUTH_SUBJECT:
       target = msg_dict["Subject"]
       salt = msg_dict["Salt"]
+      await asyncio.sleep(_login_delay)
       try:
         target_entry = db.getSubject(target)
         if target_entry:
@@ -98,21 +110,21 @@ class Protocol(asyncio.Protocol):
           self.subject = None
         await self.sendall(out_data)
       except DatabaseError:
-        self.sendError("DatabaseError")
+        await self.sendError("DatabaseError")
     elif msg_type == MessageType.PUSH_FILE:
       filename = msg_dict["File Name"]
       localpath = os.path.join(self.cd,filename)
       try:
         if db.getObject(localpath):
-          self.sendError("Object already exists")
+          await self.sendError("Object already exists")
           return
         db.insertObject(localpath)
         self.fd = db.writeObject(localpath)
       except DatabaseError:
-        self.sendError("DatabaseError")
+        await self.sendError("DatabaseError")
         return
       except IOError:
-        self.sendError("IOError")
+        await self.sendError("IOError")
         return
       log("Opened '{}' for writing after object insertion".format(localpath))
       self.status = Status.PULLING
@@ -121,38 +133,38 @@ class Protocol(asyncio.Protocol):
       localpath = os.path.join(self.cd,filename)
       try:
         if not db.getObject(localpath):
-          self.sendError("Object does not exist")
+          await self.sendError("Object does not exist")
           return
         self.fd = db.readObject(localpath)
       except DatabaseError:
-        self.sendError("DatabaseError")
+        await self.sendError("DatabaseError")
         return
       except IOError:
-        self.sendError("IOError")
+        await self.sendError("IOError")
         return
       log("Opened '{}' for reading".format(localpath))
       self.status = Status.PUSHING
       data = self.fd.read(_data_size)
       while data:
-        out_data = strategies[(MessageClass.PRIVATE,MessageType.XFER_FILE)].build(
+        out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build(
                                 [data,len(data)],self.stream,self.hmacf)
         await self.sendall(out_data)
         data = self.fd.read(_data_size)
-      await self.sendall(strategies[(MessageClass.PRIVATE,MessageType.TASK_DONE)].build(
+      await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
                                 None,self.stream,self.hmacf))
       self.status = Status.NORMAL
     elif msg_type == MessageType.XFER_FILE:
       if self.status == Status.PULLING:
         assert(self.fd)
-        self.fd.write(msg_dict["Data"][msg_dict["BSize"]])
+        self.fd.write(msg_dict["Data"][:msg_dict["BSize"]])
       else:
-        self.sendError("Ambiguous message sequence")
+        await self.sendError("Ambiguous message sequence")
     elif msg_type == MessageType.TASK_DONE:
       if self.fd:
         self.fd.close()
       self.fd = None
-      self.status = Status.Normal
+      self.status = Status.NORMAL
     else:
-      self.sendError("Unexpected message type")
+      await self.sendError("Unexpected message type")
 
 

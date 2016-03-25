@@ -1,12 +1,10 @@
 
 import socket
 import hashlib
-import math
-from os import urandom
+import os
 
 from . import __version__, _msg_size, _hash_rounds, _data_size
 
-from SPM.Util import log
 from SPM.Messages import MessageStrategy, MessageClass, MessageType, BadMessageError
 from SPM.Stream import RC4, make_hmacf
 
@@ -58,7 +56,7 @@ class Client():
     print("Authenticating...")
     if not self.connected:
       raise ClientError("Not connected to a server.")
-    salt = urandom(32)
+    salt = os.urandom(32)
     self.key = hashlib.pbkdf2_hmac("sha1",password.encode("UTF-8"),salt,_hash_rounds,dklen=256)
     self.hmacf = make_hmacf(self.key)
     self.stream = RC4(self.key)
@@ -93,16 +91,36 @@ class Client():
       raise ClientError("No active connection.")
     if not self.subject or not self.stream:
       raise ClientError("Not authenticated.")
-    f_size = os.path.getsize(localpath)
-    f_parts = math.ceil(f_size/_data_size)
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)].build(
-                        [os.path.basename(remotename),f_parts-1],self.stream,self.hmacf))
-    with open(path,"rb") as fd:
-      for curpart in range(f_parts):
-        print("Sending part {} of {}...".format(curpart,f_parts-1))
-        data = fd.read(_data_size)
+                        [os.path.basename(remotename)],self.stream,self.hmacf))
+    with open(localpath,"rb") as fd:
+      data = fd.read(_data_size)
+      while data:
         self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build(
-          [data,curpart,len(data)],self.stream,self.hmacf))
+          [data,len(data)],self.stream,self.hmacf))
+        data = fd.read(_data_size)
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
+          None,self.stream,self.hmacf))
+
+  def getFile(self,remotename,localpath):
+    if os.path.isfile(localpath):
+      raise ClientError("File exists.")
+    if not self.connected:
+      raise ClientError("No active connection.")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated.")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.PULL_FILE)].build(
+                        [os.path.basename(remotename)],self.stream,self.hmacf))
+    with open(localpath,"wb") as fd:
+      msg_dict = self.readMessage()
+      while msg_dict["MessageType"] == MessageType.XFER_FILE:
+        fd.write(msg_dict["Data"][:msg_dict["BSize"]])
+        msg_dict = self.readMessage()
+      if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
+        raise ClientError("ServerError %s" % str(msg_dict["Error Message"]))
+      elif msg_dict["MessageType"] != MessageType.TASK_DONE:
+        raise ClientError("Unexpected message sequence.")
+      
 
   def resetConnection(self):
     self.stream = None

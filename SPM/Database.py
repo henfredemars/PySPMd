@@ -40,7 +40,6 @@ class Database:
     self.c.execute("end transaction")
     if not os.path.exists(self.root):
       os.mkdir(self.root)
-    os.chdir(self.root)
 
   def __enter__(self):
     return self
@@ -226,7 +225,7 @@ class Database:
     if localpath[0] != "/":
       raise DatabaseError("The path is invalid.")
     self.c.execute("select localpath from objects where localpath=?",(localpath,))
-    t = self.c.findone()
+    t = self.c.fetchone()
     if t:
       return t[0]
     return None
