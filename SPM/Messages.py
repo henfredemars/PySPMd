@@ -38,10 +38,10 @@ class MessageType(Enum):
   PULL_FILE             = TypeInfo(bytes([3]),"!{}s".format(_file_size),("File Name",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  PUSH_FILE             = TypeInfo(bytes([4]),"!{}sQ".format(_file_size),("File Name",),
-                            Codec(lambda a: (utf_enc(a[0]),int(a[1])),
-                                  lambda a: (utf_dec(a[0]),int(a[1]))))
-  XFER_FILE             = TypeInfo(bytes([5]),"!{}sQH".format(_data_size),("Data","BSize"),
+  PUSH_FILE             = TypeInfo(bytes([4]),"!{}s".format(_file_size),("File Name",),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  XFER_FILE             = TypeInfo(bytes([5]),"!{}sH".format(_data_size),("Data","BSize"),
                             Codec(lambda a: (bytes(a[0]),int(a[1])),
                                   lambda a: (bytes(a[0]),int(a[1]))))
   TASK_DONE		= TypeInfo(bytes([6]),None,None,

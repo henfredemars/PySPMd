@@ -6,13 +6,13 @@ import SPM.Protocol
 from SPM.Database import Database
 from SPM.Util import log
 
-SPM.Protocol.db = Database()
-
 #Server
 
 class Server():
 
   def __init__(self,bind,port):
+    if not SPM.Protocol.db:
+      SPM.Protocol.db = Database()
     self.port = port
     self.bind = bind
     self.loop = asyncio.get_event_loop()
