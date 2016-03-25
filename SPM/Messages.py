@@ -7,8 +7,8 @@ from hmac import compare_digest
 
 from SPM.Util import log
 
-from . import _msg_size, _subject_size, _password_size
-from . import _file_size, _hash_size, _ticket_size
+from . import _msg_size, _subject_size, _password_size, _lss_count
+from . import _file_size, _hash_size, _ticket_size, _ls_count
 from . import _error_msg_size, _salt_size, _data_size
 
 #Messages
@@ -59,12 +59,12 @@ class MessageType(Enum):
                             Codec(None,None))
   LIST_SUBJECT_CLIENT   = TypeInfo(bytes([11]),None,None,
                             Codec(None,None))
-  LIST_SUBJECT_SERVER   = TypeInfo(bytes([12]),("!{}s".format(_subject_size))*31,("Subject",)*31,
+  LIST_SUBJECT_SERVER   = TypeInfo(bytes([12]),("!"+("{}s".format(_subject_size))*_lss_count),("Subject",)*_lss_count,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   LIST_OBJECT_CLIENT    = TypeInfo(bytes([13]),None,None,
                             Codec(None,None))
-  LIST_OBJECT_SERVER    = TypeInfo(bytes([14]),("!{}s".format(_file_size))*7,("File",)*7,
+  LIST_OBJECT_SERVER    = TypeInfo(bytes([14]),("!{}s".format(_file_size))*_ls_count,("File",)*_ls_count,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   GIVE_TICKET_SUBJECT   = TypeInfo(bytes([15]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
@@ -185,7 +185,16 @@ class MessageStrategy:
       arg_count = len(msg_type.value.args)
       assert len(contents) == len(msg_type.value.args)
       for i in range(arg_count):
-        msg_dict[msg_type.value[2][i]] = contents[i]
+        entry_title = msg_type.value.args[i]
+        value = contents[i]
+        if entry_title in msg_dict.keys():
+          try:
+            msg_dict[entry_title].append(value)
+          except AttributeError:
+            msg_dict[entry_title] = [msg_dict[entry_title]]
+            msg_dict[entry_title].append(value)
+        else:
+          msg_dict[entry_title] = value
     msg_dict["MessageClass"] = msg_class
     msg_dict["MessageType"] = msg_type
     return msg_dict

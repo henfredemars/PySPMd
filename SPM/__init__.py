@@ -19,8 +19,11 @@ _hash_rounds = 2**4
 _debug = True
 _debug_width = 300
 
-assert _msg_size / _subject_size >= 31
-assert _msg_size / _file_size >= 7
+_lss_count = 31
+_ls_count = 7
+
+assert _msg_size / _subject_size >= _lss_count
+assert _msg_size / _file_size >= _ls_count
 
 #Take care when tuning these parameters so that all messages, including
 # authentication tags, will fit within the allowed message size
