@@ -84,6 +84,24 @@ class Client():
       self.resetConnection()
       return False
 
+  def listSubjects(self):
+    if not self.connected:
+      raise ClientError("Not connected to a server.")
+    if not self.stream:
+      raise ClientError("Cannot list subjects unless authenticated.")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_CLIENT)].build(
+                        None,self.stream,self.hmacf))
+    subjects = []
+    msg_dict = self.readMessage()
+    while msg_dict["MessageType"] == MessageType.LIST_SUBJECT_SERVER:
+      subjects.extend(msg_dict["Subject"])
+      msg_dict = self.readMessage()
+    if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
+      raise ClientError("ServerError %s" % str(msg_dict["Error Message"]))
+    elif msg_dict["MessageType"] != MessageType.TASK_DONE:
+      raise ClientError("Unexpected message sequence.")
+    return [subject for subject in subjects if subject]
+
   def sendFile(self,remotename,localpath):
     if not os.path.isfile(localpath):
       raise ClientError("File does not exist.")

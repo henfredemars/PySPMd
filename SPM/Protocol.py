@@ -3,8 +3,8 @@ import asyncio
 import hashlib
 import os
 
-from . import __version__, _msg_size, _hash_rounds, _data_size, _login_delay
-from SPM.Util import log
+from . import __version__, _msg_size, _hash_rounds, _data_size, _login_delay, _lss_count
+from SPM.Util import log, chunks
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType
 from SPM.Messages import BadMessageError
@@ -164,6 +164,19 @@ class Protocol(asyncio.Protocol):
         self.fd.close()
       self.fd = None
       self.status = Status.NORMAL
+    elif msg_type == MessageType.LIST_SUBJECT_CLIENT:
+      subjects = db.getSubjectNames()
+      s_lists = chunks(subjects,_lss_count)
+      for list in s_lists:
+        while len(list) < _lss_count:
+          list.append("")
+      msgs = map(lambda s_list: strategies[(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_SERVER)]
+                 .build(s_list,self.stream,self.hmacf),s_lists)
+      for msg_block in msgs:
+        await self.sendall(msg_block)
+      await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
+                                None,self.stream,self.hmacf))
+      print("sent subjects")
     else:
       await self.sendError("Unexpected message type")
 

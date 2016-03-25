@@ -64,6 +64,13 @@ class Database:
       return Subject(*t)
     return None
 
+  def getSubjectNames(self):
+    subjects = []
+    for subject in self.c.execute("select subject from subjects order by subject"):
+      subjects.append(subject)
+    return subjects
+    
+
   def deleteSubject(self,name):
     if not name:
       raise DatabaseError("Cannot delete subject without a name.")
