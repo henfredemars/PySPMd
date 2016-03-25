@@ -103,10 +103,12 @@ class Protocol(asyncio.Protocol):
           out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)].build([
             target_entry.subject],self.stream,self.hmacf)
           self.subject = target_entry.subject
-        else:
-          out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.REJECT_AUTH)].build()
-          self.stream = None
-          self.hmacf = None
+        else: #This is our way of rejecting the login
+          key = os.urandom(256)
+          self.stream = RC4(key)
+          self.hmacf = make_hmacf(key)
+          out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)].build([
+            target_entry.subject],self.stream,self.hmacf)
           self.subject = None
         await self.sendall(out_data)
       except DatabaseError:
