@@ -62,7 +62,7 @@ class MessageType(Enum):
                                   lambda a: map(utf_dec,a)))
   LIST_OBJECT_CLIENT    = TypeInfo(bytes([12]),None,None,
                             Codec(None,None))
-  LIST_OBJECT_SERVER    = TypeInfo(bytes([13]),("!{}s".format(_file_size))*_ls_count,("File",)*_ls_count,
+  LIST_OBJECT_SERVER    = TypeInfo(bytes([13]),("!"+("{}s".format(_file_size))*_ls_count),("File",)*_ls_count,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   GIVE_TICKET_SUBJECT   = TypeInfo(bytes([14]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
