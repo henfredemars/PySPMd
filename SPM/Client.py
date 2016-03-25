@@ -7,6 +7,7 @@ from . import __version__, _msg_size, _hash_rounds, _data_size
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType, BadMessageError
 from SPM.Stream import RC4, make_hmacf
+from SPM.Util import log
 
 strategies = MessageStrategy.strategies
 
@@ -50,10 +51,11 @@ class Client():
       if msg_dict["Version"] != __version__:
         self.socket.close()
         raise ClientError("Server version mismatch.")
+    log("Successful connection.")
     self.connected = True
 
   def authenticate(self,subject,password):
-    print("Authenticating...")
+    log("Authenticating...")
     if not self.connected:
       raise ClientError("Not connected to a server.")
     salt = os.urandom(32)
@@ -66,21 +68,15 @@ class Client():
       msg_dict = self.readMessage()
       msg_type = msg_dict["MessageType"]
     except BadMessageError as e:
-      print(str(e))
+      log(str(e))
+      log("Probably your login information was incorrect.")
       self.resetConnection()
       return False
     if msg_type == MessageType.CONFIRM_AUTH:
-      print("Authentication success.")
+      log("Authentication success.")
       return True
-    elif msg_type == MessageType.REJECT_AUTH:
-      print("The server explicitly rejected us.")
-      self.key = None
-      self.hmacf = None
-      self.subject = None
-      self.stream = None
-      return False
     else:
-      print("Unexpected message from the server (bad password)")
+      log("Unexpected message from the server (bad login information)")
       self.resetConnection()
       return False
 
