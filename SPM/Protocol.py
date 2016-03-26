@@ -70,6 +70,10 @@ class Protocol(asyncio.Protocol):
     else:
       log("%s connection closed" % self.peerinfo[0])
 
+  async def sendTaskDone(self):
+    await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
+                                None,self.stream,self.hmacf))
+
   def data_received(self,data):
     self.buf.extend(data)
     while len(self.buf) >= _msg_size:
@@ -175,8 +179,7 @@ class Protocol(asyncio.Protocol):
                                 [data,len(data)],self.stream,self.hmacf)
         await self.sendall(out_data)
         data = self.fd.read(_data_size)
-      await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
-                                None,self.stream,self.hmacf))
+      await self.sendTaskDone()
       self.status = Status.NORMAL
     elif msg_type == MessageType.XFER_FILE:
       if self.status == Status.PULLING:
@@ -199,8 +202,7 @@ class Protocol(asyncio.Protocol):
                  .build(s_list,self.stream,self.hmacf),s_lists)
       for msg_block in msgs:
         await self.sendall(msg_block)
-      await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
-                                None,self.stream,self.hmacf))
+      await self.sendTaskDone()
     elif msg_type == MessageType.LIST_OBJECT_CLIENT:
       objects = os.path.listdir(expandPath(self.pwd,self.cd,localpath))
       s_lists = chunks(objects,_ls_count)
@@ -211,8 +213,7 @@ class Protocol(asyncio.Protocol):
                  .build(s_list,self.stream,self.hmacf),s_lists)
       for msg_block in msgs:
         await self.sendall(msg_block)
-      await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
-                                None,self.stream,self.hmacf))
+      await self.sendTaskDone()
     elif msg_type == MessageType.GIVE_TICKET_SUBJECT:
       try:
         subject = db.getSubject(msg_dict["Subject"])
@@ -230,7 +231,8 @@ class Protocol(asyncio.Protocol):
         return
       except DatabaseError:
         await self.sendError("DatabaseError")
-        db.insertRight(subject,ticket,target,isObject)
+      db.insertRight(subject,ticket,target,isObject)
+      await self.sendTaskDone()
     elif msg_type == MessageType.TAKE_TICKET_SUBJECT:
       try:
         subject = db.getSubject(msg_dict["Subject"])
@@ -250,13 +252,18 @@ class Protocol(asyncio.Protocol):
         await self.sendError("DatabaseError")
         return
       db.deleteRight(subject,ticket,target,isObject)
+      await self.sendTaskDone()
     elif msg_type == MessageType.MAKE_DIRECTORY:
       directory = msg_dict["Directory"]
       abs_path = expandPath(self.pwd,self.cd,directory)
       rel_path = expandPath("/",self.cd,directory)
+      if os.path.exists(abs_path):
+        await self.sendError("Path already exists")
+        return
       try:
         db.insertObject(rel_path,True)
         os.makedirs(abs_path)
+        await self.sendTaskDone()
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.MAKE_SUBJECT:
@@ -274,6 +281,7 @@ class Protocol(asyncio.Protocol):
           await self.sendError("Subject must have a type")
           return
         db.insertSubject(msg_dict["Subject"],password,stype,False)
+        await self.sendTaskDone()
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.CD:
@@ -282,6 +290,7 @@ class Protocol(asyncio.Protocol):
       rel_path = expandPath("/",self.cd,path)
       if os.path.isdir(abs_path):
         self.cd = rel_path
+        await self.sendTaskDone()
       else:
         await self.sendError("Path does not appear to exist")
     elif msg_type == MessageType.MAKE_FILTER:
@@ -302,6 +311,7 @@ class Protocol(asyncio.Protocol):
           subject1 = subject1.subject
           subject2 = subject2.subject
           db.insertLink(subject1,subject2)
+          await self.sendTaskDone()
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.DELETE_PATH:

@@ -35,7 +35,7 @@ class Client():
       self.buf.extend(self.socket.recv(4096))
     msg_dict = MessageStrategy.parse(self.buf[0:_msg_size],self.stream,self.hmacf)
     self.buf = self.buf[_msg_size:]
-    return msg_dict
+    return msg_dict    
 
   def connected(self):
     return self.connected
@@ -46,18 +46,18 @@ class Client():
     msg_dict = self.readMessage()
     if msg_dict["MessageType"] != MessageType.HELLO_SERVER:
       self.socket.close()
-      raise ClientError("Server did not reply as expected.")
+      raise ClientError("Server did not reply as expected")
     else:
       if msg_dict["Version"] != __version__:
         self.socket.close()
-        raise ClientError("Server version mismatch.")
+        raise ClientError("Server version mismatch")
     log("Successful connection.")
     self.connected = True
 
   def authenticate(self,subject,password):
     log("Authenticating...")
     if not self.connected:
-      raise ClientError("Not connected to a server.")
+      raise ClientError("Not connected to a server")
     salt = os.urandom(32)
     self.key = hashlib.pbkdf2_hmac("sha1",password.encode("UTF-8"),salt,_hash_rounds,dklen=256)
     self.hmacf = make_hmacf(self.key)
@@ -82,9 +82,9 @@ class Client():
 
   def listSubjects(self):
     if not self.connected:
-      raise ClientError("Not connected to a server.")
+      raise ClientError("Not connected to a server")
     if not self.stream:
-      raise ClientError("Cannot list subjects unless authenticated.")
+      raise ClientError("Cannot list subjects unless authenticated")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_CLIENT)].build(
                         None,self.stream,self.hmacf))
     subjects = []
@@ -93,16 +93,16 @@ class Client():
       subjects.extend(msg_dict["Subject"])
       msg_dict = self.readMessage()
     if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
-      raise ClientError("ServerError %s" % str(msg_dict["Error Message"]))
+      raise ClientError("ServerError: %s" % str(msg_dict["Error Message"]))
     elif msg_dict["MessageType"] != MessageType.TASK_DONE:
-      raise ClientError("Unexpected message sequence.")
+      raise ClientError("Unexpected message sequence")
     return [subject for subject in subjects if subject]
 
   def listObjects(self):
     if not self.connected:
-      raise ClientError("Not connected to a server.")
+      raise ClientError("Not connected to a server")
     if not self.stream:
-      raise ClientError("Cannot list subjects unless authenticated.")
+      raise ClientError("Cannot list subjects unless authenticated")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.LIST_OBJECT_CLIENT)].build(
                         None,self.stream,self.hmacf))
     objects = []
@@ -111,18 +111,50 @@ class Client():
       objects.extend(msg_dict["File"])
       msg_dict = self.readMessage()
     if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
-      raise ClientError("ServerError %s" % str(msg_dict["Error Message"]))
+      raise ClientError("ServerError: %s" % str(msg_dict["Error Message"]))
     elif msg_dict["MessageType"] != MessageType.TASK_DONE:
-      raise ClientError("Unexpected message sequence.")
+      raise ClientError("Unexpected message sequence")
     return [object for object in objects if object]
+
+  def giveTicketSubject(subject,ticket):
+    if not self.connected:
+      raise ClientError("Not connected to a server")
+    if not self.stream:
+      raise ClientError("Cannot list subjects unless authenticated")
+    if not isinstance(ticket,Ticket):
+      try:
+        ticket = Ticket(ticket)
+      except BadTicketError:
+        raise ClientError("Bad ticket")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.GIVE_TICKET_SUBJECT)]
+                        .build([subject,repr(ticket)],self.stream,self.hmacf))
+    msg_dict = self.readMessage()
+    if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
+      raise ClientError("ServerError: %s" % msg_dict["Error Message"])
+
+  def takeTicketSubject(subject,ticket):
+    if not self.connected:
+      raise ClientError("Not connected to a server")
+    if not self.stream:
+      raise ClientError("Cannot list subjects unless authenticated")
+    if not isinstance(ticket,Ticket):
+      try:
+        ticket = Ticket(ticket)
+      except BadTicketError:
+        raise ClientError("Bad ticket")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TAKE_TICKET_SUBJECT)]
+                        .build([subject,repr(ticket)],self.stream,self.hmacf))
+    msg_dict = self.readMessage()
+    if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
+      raise ClientError("ServerError: %s" % msg_dict["Error Message"])
 
   def sendFile(self,remotename,localpath):
     if not os.path.isfile(localpath):
-      raise ClientError("File does not exist.")
+      raise ClientError("File does not exist")
     if not self.connected:
-      raise ClientError("No active connection.")
+      raise ClientError("No active connection")
     if not self.subject or not self.stream:
-      raise ClientError("Not authenticated.")
+      raise ClientError("Not authenticated")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)].build(
                         [os.path.basename(remotename)],self.stream,self.hmacf))
     with open(localpath,"rb") as fd:
@@ -136,11 +168,11 @@ class Client():
 
   def getFile(self,remotename,localpath):
     if os.path.isfile(localpath):
-      raise ClientError("File exists.")
+      raise ClientError("File exists")
     if not self.connected:
-      raise ClientError("No active connection.")
+      raise ClientError("No active connection")
     if not self.subject or not self.stream:
-      raise ClientError("Not authenticated.")
+      raise ClientError("Not authenticated")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.PULL_FILE)].build(
                         [os.path.basename(remotename)],self.stream,self.hmacf))
     with open(localpath,"wb") as fd:
@@ -149,9 +181,9 @@ class Client():
         fd.write(msg_dict["Data"][:msg_dict["BSize"]])
         msg_dict = self.readMessage()
       if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
-        raise ClientError("ServerError %s" % str(msg_dict["Error Message"]))
+        raise ClientError("ServerError: %s" % str(msg_dict["Error Message"]))
       elif msg_dict["MessageType"] != MessageType.TASK_DONE:
-        raise ClientError("Unexpected message sequence.")
+        raise ClientError("Unexpected message sequence")
       
 
   def resetConnection(self):
