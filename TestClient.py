@@ -11,7 +11,7 @@ from SPM.Database import Database
 def main():
   with Database() as db:
     if not db.getSubject("admin"):
-      db.insertSubject("admin","password",True)
+      db.insertSubject("admin","password","main",True)
   if os.path.exists("test.bin"):
     os.remove("test.bin")
   with open("test.bin","wb") as fd:

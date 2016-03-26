@@ -8,7 +8,7 @@ from hmac import compare_digest
 from SPM.Util import log
 
 from . import _msg_size, _subject_size, _password_size, _lss_count
-from . import _file_size, _hash_size, _ticket_size, _ls_count
+from . import _file_size, _hash_size, _ticket_size, _ls_count, _type_size
 from . import _error_msg_size, _salt_size, _data_size
 
 #Messages
@@ -65,22 +65,24 @@ class MessageType(Enum):
   LIST_OBJECT_SERVER    = TypeInfo(bytes([13]),("!"+("{}s".format(_file_size))*_ls_count),("File",)*_ls_count,
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  GIVE_TICKET_SUBJECT   = TypeInfo(bytes([14]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
+  GIVE_TICKET_SUBJECT   = TypeInfo(bytes([14]),"!{0}s{1}s{0}sB".format(_subject_size,_ticket_size),
+                                   ("Subject","Ticket","Target","IsObject"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  TAKE_TICKET_SUBJECT   = TypeInfo(bytes([15]),"!{}s{}s".format(_subject_size,_ticket_size),("Subject","Ticket"),
+  TAKE_TICKET_SUBJECT   = TypeInfo(bytes([15]),"!{0}s{1}s{0}sB".format(_subject_size,_ticket_size),
+                                   ("Subject","Ticket","Target","IsObject"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   MAKE_DIRECTORY        = TypeInfo(bytes([16]),"!{}s".format(_file_size),("Directory"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_SUBJECT          = TypeInfo(bytes([17]),"!{}s{}s".format(_subject_size,_password_size),("Subject","Password"),
+  MAKE_SUBJECT          = TypeInfo(bytes([17]),"!{}s{}s{}s".format(_subject_size,_password_size,_type_size),("Subject","Password","Type"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   CD                    = TypeInfo(bytes([18]),"!{}s".format(_file_size),("Path",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_FILTER           = TypeInfo(bytes([19]),"!{0}s{0}s{1}s".format(_subject_size,_ticket_size),("Subject1","Subject2","Ticket"),
+  MAKE_FILTER           = TypeInfo(bytes([19]),"!{0}s{0}s{1}s".format(_type_size,_ticket_size),("Type1","Type2","Ticket"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   MAKE_LINK             = TypeInfo(bytes([20]),"!{0}s{0}s".format(_subject_size),("Subject1","Subject2"),
