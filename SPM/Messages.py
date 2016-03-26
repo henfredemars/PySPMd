@@ -88,16 +88,13 @@ class MessageType(Enum):
   MAKE_LINK             = TypeInfo(bytes([20]),"!{0}s{0}s".format(_subject_size),("Subject1","Subject2"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  DELETE_FILE           = TypeInfo(bytes([21]),"!{}s".format(_file_size),("File Name",),
+  DELETE_PATH           = TypeInfo(bytes([21]),"!{}s".format(_file_size),("Path",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  CLEAR_FILTERS         = TypeInfo(bytes([22]),"!{}s".format(_subject_size),("Subject",),
+  CLEAR_LINKS           = TypeInfo(bytes([22]),"!{}s".format(_subject_size),("Subject",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  CLEAR_LINKS           = TypeInfo(bytes([23]),"!{}s".format(_subject_size),("Subject",),
-                            Codec(lambda a: map(utf_enc,a),
-                                  lambda a: map(utf_dec,a)))
-  DELETE_SUBJECT        = TypeInfo(bytes([24]),"!{}s".format(_subject_size),("Subject",),
+  DELETE_SUBJECT        = TypeInfo(bytes([23]),"!{}s".format(_subject_size),("Subject",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
 

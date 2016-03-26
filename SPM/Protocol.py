@@ -2,11 +2,12 @@
 import asyncio
 import hashlib
 import random
+import shutil
 import os
 
 from . import __version__, _msg_size, _hash_rounds, _data_size, _min_pass_len
 from . import _base_login_delay, _lss_count, _ls_count
-from SPM.Util import log, chunks
+from SPM.Util import log, chunks, expandPath
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType
 from SPM.Messages import BadMessageError
@@ -76,25 +77,36 @@ class Protocol(asyncio.Protocol):
       self.buf = self.buf[_msg_size:]
 
   async def dispatch_msg_block(self,msg_block):
+    #Leave immidiately if the transport is closing
+    if self.transport.is_closing():
+      return
+    #Try to parse the (possibly evil) message
     try:
       msg_dict = MessageStrategy.parse(msg_block,self.stream,self.hmacf)
     except BadMessageError:
       await self.sendError("BadMessageError")
       return
+    #Record message information
     msg_type = msg_dict["MessageType"]
     log(str(msg_type))
+    #Big, ugly switch to handle the message
     if msg_type == MessageType.HELLO_CLIENT:
       log("Client reported version: %s" % msg_dict["Version"])
       if __version__ != msg_dict["Version"]:
         await self.sendError("Version Mismatch")
-        return
-      out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)].build([__version__])
-      await self.sendall(out_data)
+      else:
+        out_data = strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)].build([__version__])
+        await self.sendall(out_data)
     elif msg_type == MessageType.DIE:
+      #Immidiately close the connection
       self.transport.close()
     elif msg_type == MessageType.AUTH_SUBJECT:
       target = msg_dict["Subject"]
       salt = msg_dict["Salt"]
+      if not target or not salt:
+        await self.sendError("Missing target or salt")
+        return
+      #Resist timing attacks on the login process
       await asyncio.sleep(_base_login_delay + random.random())
       try:
         target_entry = db.getSubject(target)
@@ -118,12 +130,14 @@ class Protocol(asyncio.Protocol):
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.PUSH_FILE:
       filename = msg_dict["File Name"]
-      localpath = os.path.join(self.cd,filename)
+      localpath = expandPath("/",self.cd,filename)
       try:
         if db.getObject(localpath):
           await self.sendError("Object already exists")
           return
         db.insertObject(localpath)
+        if self.fd:
+          self.fd.close()
         self.fd = db.writeObject(localpath)
       except DatabaseError:
         await self.sendError("DatabaseError")
@@ -135,11 +149,17 @@ class Protocol(asyncio.Protocol):
       self.status = Status.PULLING
     elif msg_type == MessageType.PULL_FILE:
       filename = msg_dict["File Name"]
-      localpath = os.path.join(self.cd,filename)
+      localpath = expandPath("/",self.cd,filename)
+      abs_path = expandPath(self.pwd,self.cd,filename)
+      if not os.path.isfile(abs_path):
+        await self.sendError("Not a valid file for reading")
+        return
       try:
         if not db.getObject(localpath):
           await self.sendError("Object does not exist")
           return
+        if self.fd:
+          self.fd.close()
         self.fd = db.readObject(localpath)
       except DatabaseError:
         await self.sendError("DatabaseError")
@@ -182,7 +202,7 @@ class Protocol(asyncio.Protocol):
       await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
                                 None,self.stream,self.hmacf))
     elif msg_type == MessageType.LIST_OBJECT_CLIENT:
-      objects = db.getObjectNames(self.cd)
+      objects = os.path.listdir(expandPath(self.pwd,self.cd,localpath))
       s_lists = chunks(objects,_ls_count)
       for list in s_lists:
         while len(list) < _ls_count:
@@ -199,9 +219,12 @@ class Protocol(asyncio.Protocol):
         ticket = Ticket(msg_dict["Ticket"])
         target = db.getSubject(msg_dict["Target"])
         isObject = bool(msg_dict["IsObject"])
-        if not subject:
+        if not subject or not target:
           await self.sendError("No such subject")
           return
+        else:
+          subject = subject.subject
+          target = target.subject
       except BadTicketError:
         await self.sendError("BadTicketError")
         return
@@ -214,9 +237,12 @@ class Protocol(asyncio.Protocol):
         ticket = Ticket(msg_dict["Ticket"])
         target = db.getSubject(msg_dict["Target"])
         isObject = bool(msg_dict["IsObject"])
-        if not subject:
+        if not subject or not target:
           await self.sendError("No such subject")
           return
+        else:
+          subject = subject.subject
+          target = target.subject
       except BadTicketError:
         await self.sendError("BadTicketError")
         return
@@ -226,10 +252,13 @@ class Protocol(asyncio.Protocol):
       db.deleteRight(subject,ticket,target,isObject)
     elif msg_type == MessageType.MAKE_DIRECTORY:
       directory = msg_dict["Directory"]
+      abs_path = expandPath(self.pwd,self.cd,directory)
+      rel_path = expandPath("/",self.cd,directory)
       try:
-        os.makedirs(self.cd+os.sep+directory,exist_ok = True)
-      except OSError:
-        await sendError("Invalid directory structure")
+        db.insertObject(rel_path,True)
+        os.makedirs(abs_path)
+      except DatabaseError:
+        await self.sendError("DatabaseError")
     elif msg_type == MessageType.MAKE_SUBJECT:
       try:
         subject = db.getSubject(msg_dict["Subject"])
@@ -244,21 +273,53 @@ class Protocol(asyncio.Protocol):
         if not stype:
           await self.sendError("Subject must have a type")
           return
-        db.insertSubject(subject,password,stype,False)
+        db.insertSubject(msg_dict["Subject"],password,stype,False)
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.CD:
       path = msg_type["Path"]
-      if path == ".":
-        return
-      elif path == "..":
-        self.cd = os.path.dirname(self.cd)
-      elif os.path.exists(self.cd+os.sep+path):
-        self.cd = os.path.join(self.cd,path)
-        self.cd = os.path.abspath(self.pwd+self.cd[1:])
-        self.cd = self.cd[len(self.pwd)-1:]
+      abs_path = expandPath(self.pwd,self.cd,path)
+      rel_path = expandPath("/",self.cd,path)
+      if os.path.isdir(abs_path):
+        self.cd = rel_path
       else:
         await self.sendError("Path does not appear to exist")
+    elif msg_type == MessageType.MAKE_FILTER:
+      type1 = msg_dict["Type1"]
+      type2 = msg_dict["Type2"]
+      try:
+        ticket = Ticket(msg_dict["Ticket"])
+      except BadTicketError:
+        await self.sendError("BadTicketError")
+      db.insertFilter(type1,type2,ticket)
+    elif msg_type == MessageType.MAKE_LINK:
+      try:
+        subject1 = db.getSubject(msg_dict["Subject1"])
+        subject2 = db.getSubject(msg_dict["Subject2"])
+        if not subject1 or not subject2:
+          self.sendError("Subjects must exist")
+        else:
+          subject1 = subject1.subject
+          subject2 = subject2.subject
+          db.insertLink(subject1,subject2)
+      except DatabaseError:
+        await self.sendError("DatabaseError")
+    elif msg_type == MessageType.DELETE_PATH:
+      path = msg_dict["Path"]
+      abs_path = expandPath(self.pwd,self.cd,path)
+      shutil.rmtree(abs_path)
+    elif msg_type == MessageType.CLEAR_LINKS:
+      subject = msg_dict["Subject"]
+      if not subject:
+        await self.sendError("A subject is required")
+      else:
+        db.clearLinks(subject)
+    elif msg_type == MessageType.DELETE_SUBJECT:
+      subject = msg_dict["Subject"]
+      if not subject:
+        await self.sendError("A subject is required")
+      else:
+        db.deleteSubject(subject)
     else:
       await self.sendError("Unexpected message type")
 
