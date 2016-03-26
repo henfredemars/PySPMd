@@ -8,8 +8,10 @@ _hash_size = 20
 _ticket_size = 3
 
 _base_login_delay = 3
+_min_pass_len = 6
 _msg_size = 2048
 _subject_size = 64
+_type_size = _subject_size
 _password_size = 64
 _salt_size = 32
 _file_size = 256

@@ -4,7 +4,7 @@ import hashlib
 import random
 import os
 
-from . import __version__, _msg_size, _hash_rounds, _data_size
+from . import __version__, _msg_size, _hash_rounds, _data_size, _min_pass_len
 from . import _base_login_delay, _lss_count, _ls_count
 from SPM.Util import log, chunks
 
@@ -32,6 +32,7 @@ class Protocol(asyncio.Protocol):
     self.hmacf = None
     self.fd = None
     self.cd = "/"
+    self.pwd = os.getcwd()
     self.write_lock = asyncio.Lock()
 
   def pause_writing(self):
@@ -192,6 +193,72 @@ class Protocol(asyncio.Protocol):
         await self.sendall(msg_block)
       await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
                                 None,self.stream,self.hmacf))
+    elif msg_type == MessageType.GIVE_TICKET_SUBJECT:
+      try:
+        subject = db.getSubject(msg_dict["Subject"])
+        ticket = Ticket(msg_dict["Ticket"])
+        target = db.getSubject(msg_dict["Target"])
+        isObject = bool(msg_dict["IsObject"])
+        if not subject:
+          await self.sendError("No such subject")
+          return
+      except BadTicketError:
+        await self.sendError("BadTicketError")
+        return
+      except DatabaseError:
+        await self.sendError("DatabaseError")
+        db.insertRight(subject,ticket,target,isObject)
+    elif msg_type == MessageType.TAKE_TICKET_SUBJECT:
+      try:
+        subject = db.getSubject(msg_dict["Subject"])
+        ticket = Ticket(msg_dict["Ticket"])
+        target = db.getSubject(msg_dict["Target"])
+        isObject = bool(msg_dict["IsObject"])
+        if not subject:
+          await self.sendError("No such subject")
+          return
+      except BadTicketError:
+        await self.sendError("BadTicketError")
+        return
+      except DatabaseError:
+        await self.sendError("DatabaseError")
+        return
+      db.deleteRight(subject,ticket,target,isObject)
+    elif msg_type == MessageType.MAKE_DIRECTORY:
+      directory = msg_dict["Directory"]
+      try:
+        os.makedirs(self.cd+os.sep+directory,exist_ok = True)
+      except OSError:
+        await sendError("Invalid directory structure")
+    elif msg_type == MessageType.MAKE_SUBJECT:
+      try:
+        subject = db.getSubject(msg_dict["Subject"])
+        stype = msg_dict["Type"]
+        password = msg_dict["Password"]
+        if len(password) <= _min_pass_len:
+          await self.sendError("Password is way too short")
+          return
+        if subject:
+          await self.sendError("Subject already exists")
+          return
+        if not stype:
+          await self.sendError("Subject must have a type")
+          return
+        db.insertSubject(subject,password,stype,False)
+      except DatabaseError:
+        await self.sendError("DatabaseError")
+    elif msg_type == MessageType.CD:
+      path = msg_type["Path"]
+      if path == ".":
+        return
+      elif path == "..":
+        self.cd = os.path.dirname(self.cd)
+      elif os.path.exists(self.cd+os.sep+path):
+        self.cd = os.path.join(self.cd,path)
+        self.cd = os.path.abspath(self.pwd+self.cd[1:])
+        self.cd = self.cd[len(self.pwd)-1:]
+      else:
+        await self.sendError("Path does not appear to exist")
     else:
       await self.sendError("Unexpected message type")
 
