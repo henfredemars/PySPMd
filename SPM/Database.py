@@ -21,7 +21,7 @@ class Database:
 
   tables = ["create table if not exists subjects(subject text primary key, password text not null, type text not null, super integer not null)",
 	    "create table if not exists links(subject1 text not null, subject2 text not null, primary key (subject1,subject2))",
-	    "create table if not exists filters(subject1 text not null, subject2 text not null,ticket ticket not null, primary key (subject1,subject2,ticket))",
+	    "create table if not exists filters(type1 text not null, type2 text not null,ticket ticket not null, primary key (type1,type2,ticket))",
 	    "create table if not exists rights(subject1 text not null, ticket ticket not null, target text not null, object integer not null, primary key (subject1,ticket,target,object))",
 	    "create table if not exists objects(localpath text primary key, dir integer not null)"]
 
@@ -76,8 +76,14 @@ class Database:
     self.c.execute("begin transaction")
     self.c.execute("delete from subjects where subject=?",(name,))
     self.c.execute("delete from links where subject1=? or subject2=?",(name,))
-    self.c.execute("delete from filters where subject1=? or subject2=?",(name,))
     self.c.execute("delete from rights where subject=?",(name,))
+    self.c.execute("end transaction")
+
+  def clearLinks(self,name):
+    if not name:
+      raise DatabaseError("Cannot clear subject links without a name")
+    self.c.execute("begin transaction")
+    self.c.execute("delete from links where subject1=? or subject2=?",(name,))
     self.c.execute("end transaction")
 
   def insertLink(self,subject1,subject2):
@@ -108,42 +114,40 @@ class Database:
     self.c.execute("delete from links where subject1=? and subject2=?",(subject1,subject2))
     self.c.execute("end transaction")
 
-  def insertFilter(self,subject1,subject2,ticket):
-    if not subject1 or not subject2:
-      raise DatabaseError("Subject cannot be empty")
+  def insertFilter(self,type1,type2,ticket):
+    if not type1 or not type2:
+      raise DatabaseError("Types cannot be empty")
     if not ticket:
       raise DatabaseError("No filter condition provided")
-    if not self.getSubject(subject1) or not self.getSubject(subject2):
-      raise DatabaseError("All filter subjects must exist")
     try:
       ticket = Ticket.convert_ticket(ticket)
     except AssertionError:
       raise DatabaseError("Not a vaild ticket")
-    if self.getFilter(subject1,subject2,ticket):
+    if self.getFilter(type1,type2,ticket):
       return
     self.c.execute("begin transaction")
-    self.c.execute("insert into filters values(?,?,?)",(subject1,subject2,ticket))
+    self.c.execute("insert into filters values(?,?,?)",(type1,type2,ticket))
     self.c.execute("end transaction")
 
-  def getFilter(self,subject1,subject2,ticket):
-    if not subject1 or not subject2:
-      raise DatabaseError("Subject cannot be empty")
+  def getFilter(self,type1,type2,ticket):
+    if not type1 or not type2:
+      raise DatabaseError("Types cannot be empty")
     if not ticket:
       raise DatabaseError("No filter condition provided")
     try:
       ticket = Ticket.convert_ticket(ticket)
     except AssertionError:
       raise DatabaseError("Not a vaild ticket")
-    self.c.execute("select subject1,subject2,ticket from filters where subject1=? and subject2=? and ticket=?",
-	(subject1,subject2,ticket))
+    self.c.execute("select * from filters where type1=? and type2=? and ticket=?",
+	(type1,type2,ticket))
     t = self.c.findone()
     if t:
       return Filter(*t)
     return None
 
-  def deleteFilter(self,subject1,subject2,ticket):
-    if not subject1 or not subject2:
-      raise DatabaseError("Subject cannot be empty")
+  def deleteFilter(self,type1,type2,ticket):
+    if not type1 or not type2:
+      raise DatabaseError("Types cannot be empty")
     if not ticket:
       raise DatabaseError("No filter condition provided")
     try:
@@ -151,8 +155,8 @@ class Database:
     except AssertionError:
       raise DatabaseError("Not a vaild ticket")
     self.c.execute("begin transaction")
-    self.c.execute("delete from filters where subject1=? and subject2=? and ticket=?",
-	(subject1,subject2,ticket))
+    self.c.execute("delete from filters where type1=? and type2=? and ticket=?",
+	(type1,type2,ticket))
     self.c.execute("end transaction")
 
   def insertRight(self,subject,ticket,target,isobject=False):
