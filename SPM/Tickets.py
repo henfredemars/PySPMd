@@ -32,6 +32,8 @@ class Ticket:
   def convert_ticket(string):
     if isinstance(string,Ticket):
       return string
+    if isinstance(string,bytes):
+      string = string.decode(encoding="UTF-8",errors="ignore")
     return Ticket(string)
 
   def __repr__(self):
