@@ -3,6 +3,7 @@ import os
 import random
 import readline
 import subprocess
+import traceback
 from cmd import Cmd
 
 from SPM.Database import Database
@@ -36,8 +37,8 @@ class SpicyTerminal(Cmd):
     try:
       return super().onecmd(s)
     except Exception as e:
+      traceback.print_tb(e.__traceback__)
       print(e)
-      raise
       return False
 
   def postcmd(self,stop,line):
@@ -215,6 +216,60 @@ class SpicyTerminal(Cmd):
       ticket = args[3]
       isobject = args[4].lower() == "true"
       self.client.xfterTicketSubject(subject1,subject2,ticket,target,isobject)
+
+  def do_mkdir(self,directory):
+    """[mkdir dir] make a new directory on the server"""
+    if not self.client or not self.client.connected:
+      print("No active connection")
+    else:
+      self.client.makeDirectory(directory)
+
+  def do_mksub(self,line):
+    """[mksub subject stype password] make a new subject on the server"""
+    args = line.split()
+    if not self.client or not self.client.connected:
+      print("No active connection")
+    elif len(args) != 3:
+      print("Not enough arguments")
+    else:
+      self.client.makeSubject(args[0],args[1],args[2])
+
+  def do_rmsub(self,subject):
+    """[rmsub subject] delete a subject"""
+    if not self.client or not self.client.connected:
+      print("No active connection")
+    else:
+      self.client.deleteSubject(subject)
+
+  def do_mkfilt(self,line):
+    """[mkfilt type1 type2 ticket] make a rights filter"""
+    args = line.split()
+    if not self.client or not self.client.connected:
+      print("No active connection")
+    elif len(args) != 3:
+      print("Not enough arguments")
+    else:
+      self.client.makeFilter(args[0],args[1],args[2])
+
+  def do_rmfilt(self,line):
+    """[rmfilt type1 type2 ticket] delete a rights filter"""
+    args = line.split()
+    if not self.client or not self.client.connected:
+      print("No active connection")
+    elif len(args) != 3:
+      print("Not enough arguments")
+    else:
+      self.client.deleteFilter(args[0],args[1],args[2])
+
+  def do_clearlinks(self,subject):
+    """[clearlinks subject] delete a subject's connections"""
+    if not self.client or not self.client.connected:
+      print("No active connection")
+    if not subject:
+      print("Not enough arguments")
+    else:
+      self.client.clearLinks(subject)
+      
   
 def main():
   SpicyTerminal().cmdloop()
@@ -225,7 +280,7 @@ def prep_sys():
     return
   with Database() as db:
     if not db.getSubject("admin"):
-      db.insertSubject("admin","password","main",True)
+      db.insertSubject("admin","main","password",True)
   if os.path.exists("test.bin"):
     os.remove("test.bin")
   with open("test.bin","wb") as fd:

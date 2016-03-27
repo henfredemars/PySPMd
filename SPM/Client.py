@@ -7,7 +7,7 @@ from . import __version__, _msg_size, _hash_rounds, _data_size
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType, BadMessageError
 from SPM.Stream import RC4, make_hmacf
-from SPM.Tickets import Ticket
+from SPM.Tickets import Ticket, BadTicketError
 from SPM.Util import log
 
 strategies = MessageStrategy.strategies
@@ -261,7 +261,78 @@ class Client():
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.DELETE_PATH)].build(
                         [remotename],self.stream,self.hmacf))
     self.checkOkay()
-    
+
+  def makeDirectory(self,remotename):
+    """Create a directory on the remote server"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.MAKE_DIRECTORY)].build(
+                        [remotename],self.stream,self.hmacf))
+    self.checkOkay()
+
+  def makeSubject(self,subject,stype,password):
+    """Create a new subject on the server"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.MAKE_SUBJECT)].build(
+                        [subject,stype,password],self.stream,self.hmacf))
+    self.checkOkay()
+
+  def deleteSubject(self,subject):
+    """Delete a subject from the server"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.DELETE_SUBJECT)].build(
+                        [subject],self.stream,self.hmacf))
+    self.checkOkay()
+
+  def makeLink(self,subject1,subject2):
+    """Create a transfer link between two subjects"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.MAKE_LINK)].build(
+                        [subject1,subject2],self.stream,self.hmacf))
+    self.checkOkay()
+
+  def makeFilter(self,type1,type2,ticket):
+    """Create a type filter to allow rights transfers"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    ticket = str(ticket)
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.MAKE_FILTER)].build(
+                        [type1,type2,ticket],self.stream,self.hmacf))
+    self.checkOkay()
+
+  def deleteFilter(self,type1,type2,ticket):
+    """Delete a type filter for rights transfers"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    ticket = str(ticket)
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.DELETE_FILTER)].build(
+                        [type1,type2,ticket],self.stream,self.hmacf))
+    self.checkOkay()
+
+  def clearLinks(self,subject):
+    """Create a new subject on the server"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.CLEAR_LINKS)].build(
+                        [subject],self.stream,self.hmacf))
+    self.checkOkay()
 
   def resetConnection(self):
     self.stream = None

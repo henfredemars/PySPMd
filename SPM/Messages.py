@@ -73,10 +73,10 @@ class MessageType(Enum):
                                    ("Subject","Ticket","Target","IsObject"),
                             Codec(lambda a: (utf_enc(a[0]),utf_enc(a[1]),utf_enc(a[2]),int(a[3])),
                                   lambda a: (utf_dec(a[0]),utf_dec(a[1]),utf_dec(a[2]),int(a[3]))))
-  MAKE_DIRECTORY        = TypeInfo(bytes([16]),"!{}s".format(_file_size),("Directory"),
+  MAKE_DIRECTORY        = TypeInfo(bytes([16]),"!{}s".format(_file_size),("Directory",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  MAKE_SUBJECT          = TypeInfo(bytes([17]),"!{}s{}s{}s".format(_subject_size,_password_size,_type_size),("Subject","Password","Type"),
+  MAKE_SUBJECT          = TypeInfo(bytes([17]),"!{}s{}s{}s".format(_subject_size,_type_size,_password_size),("Subject","Type","Password"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   CD                    = TypeInfo(bytes([18]),"!{}s".format(_file_path_size),("Path",),
@@ -103,6 +103,9 @@ class MessageType(Enum):
                                   lambda a: map(utf_dec,a)))
   GET_CD                = TypeInfo(bytes([25]),None,None,
                             Codec(None,None))
+  DELETE_FILTER         = TypeInfo(bytes([26]),"!{0}s{0}s{1}s".format(_type_size,_ticket_size),("Type1","Type2","Ticket"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
 
 class MessageClass(Enum):
   PUBLIC_MSG = bytes([0])
@@ -231,6 +234,7 @@ MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.XFER_TICKET)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_DIRECTORY)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_SUBJECT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_FILTER)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.DELETE_FILTER)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_LINK)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CD)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.GET_CD)

@@ -7,6 +7,9 @@ from SPM.Subject import Subject
 from SPM.Link import Link
 from SPM.Filter import Filter
 from SPM.Right import Right
+from SPM.Util import expandPath
+
+from . import _min_pass_len
 
 #Database
 #
@@ -44,9 +47,11 @@ class Database:
   def __enter__(self):
     return self
 
-  def insertSubject(self,name,password,stype,super=False):
+  def insertSubject(self,name,stype,password,super=False):
     if not password or not name or not stype:
       raise DatabaseError("Name, password, and type are required")
+    if len(password) <= _min_pass_len:
+          raise DatabaseError("Password is way too short")
     self.c.execute("begin transaction")
     self.c.execute("select subject from subjects where subject=?",(name,))
     if self.c.fetchone():
@@ -75,7 +80,7 @@ class Database:
       raise DatabaseError("Cannot delete subject without a name")
     self.c.execute("begin transaction")
     self.c.execute("delete from subjects where subject=?",(name,))
-    self.c.execute("delete from links where subject1=? or subject2=?",(name,))
+    self.c.execute("delete from links where subject1=? or subject2=?",(name,name))
     self.c.execute("delete from rights where subject=?",(name,))
     self.c.execute("end transaction")
 
@@ -83,17 +88,19 @@ class Database:
     if not name:
       raise DatabaseError("Cannot clear subject links without a name")
     self.c.execute("begin transaction")
-    self.c.execute("delete from links where subject1=? or subject2=?",(name,))
+    self.c.execute("delete from links where subject1=? or subject2=?",(name,name))
     self.c.execute("end transaction")
 
   def insertLink(self,subject1,subject2):
     if not subject1 or not subject2:
       raise DatabaseError("Subject cannot be empty")
+      self.c.execute("begin transaction")
     if not self.getSubject(subject1) or not self.getSubject(subject2):
+      self.c.execute("end transaction")
       raise DatabaseError("One of the subjects does not exist in the subjects table")
     if self.getLink(subject1,subject2):
+      self.c.execute("end transaction")
       return #Link already exists
-    self.c.execute("begin transaction")
     self.c.execute("insert into links values(?,?)",(subject1,subject2))
     self.c.execute("end transaction")
 
@@ -123,9 +130,10 @@ class Database:
       ticket = Ticket.convert_ticket(ticket)
     except AssertionError:
       raise DatabaseError("Not a vaild ticket")
-    if self.getFilter(type1,type2,ticket):
-      return
     self.c.execute("begin transaction")
+    if self.getFilter(type1,type2,ticket):
+      self.c.execute("end transaction")
+      raise DatabaseError("Filter already exists")
     self.c.execute("insert into filters values(?,?,?)",(type1,type2,ticket))
     self.c.execute("end transaction")
 
@@ -140,7 +148,7 @@ class Database:
       raise DatabaseError("Not a vaild ticket")
     self.c.execute("select * from filters where type1=? and type2=? and ticket=?",
 	(type1,type2,ticket))
-    t = self.c.findone()
+    t = self.c.fetchone()
     if t:
       return Filter(*t)
     return None
@@ -181,6 +189,9 @@ class Database:
     if self.getRight(subject,ticket,target,isobject):
       return
     self.c.execute("begin transaction")
+    if self.getRight(subject,ticket,target,isobject):
+      self.c.execute("end transaction")
+      raise DatabaseError("Right already exists for this subject")
     self.c.execute("insert into rights values(?,?,?,?)",(subject,ticket,target,isobject))
     self.c.execute("end transaction")
 
@@ -226,6 +237,11 @@ class Database:
         if not os.path.isdir(path_so_far):
           raise DatabaseError("A parent directory is missing from the filesystem")
     self.c.execute("begin transaction")
+    if self.getObject(localpath):
+      self.c.execute("end transaction")
+      raise DatabaseError("The object already exists in the database")
+    if isdir:
+      os.mkdir(expandPath(self.root,"",localpath))
     self.c.execute("insert into objects values(?,?)",(localpath,isdir))
     self.c.execute("end transaction")
 
