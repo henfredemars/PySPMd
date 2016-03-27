@@ -44,7 +44,7 @@ class MessageType(Enum):
   XFER_FILE             = TypeInfo(bytes([5]),"!{}sH".format(_data_size),("Data","BSize"),
                             Codec(lambda a: (bytes(a[0]),int(a[1])),
                                   lambda a: (bytes(a[0]),int(a[1]))))
-  TASK_DONE		= TypeInfo(bytes([6]),None,None,
+  OKAY		= TypeInfo(bytes([6]),None,None,
                             Codec(None,None))
   ERROR_SERVER          = TypeInfo(bytes([7]),"!{}s".format(_error_msg_size),("Error Message",),
                             Codec(lambda a: map(utf_enc,a),
@@ -67,12 +67,12 @@ class MessageType(Enum):
                                   lambda a: map(utf_dec,a)))
   GIVE_TICKET_SUBJECT   = TypeInfo(bytes([14]),"!{0}s{1}s{0}sB".format(_subject_size,_ticket_size),
                                    ("Subject","Ticket","Target","IsObject"),
-                            Codec(lambda a: map(utf_enc,a),
-                                  lambda a: map(utf_dec,a)))
+                            Codec(lambda a: (utf_enc(a[0]),utf_enc(a[1]),utf_enc(a[2]),int(a[3])),
+                                  lambda a: (utf_dec(a[0]),utf_dec(a[1]),utf_dec(a[2]),int(a[3]))))
   TAKE_TICKET_SUBJECT   = TypeInfo(bytes([15]),"!{0}s{1}s{0}sB".format(_subject_size,_ticket_size),
                                    ("Subject","Ticket","Target","IsObject"),
-                            Codec(lambda a: map(utf_enc,a),
-                                  lambda a: map(utf_dec,a)))
+                            Codec(lambda a: (utf_enc(a[0]),utf_enc(a[1]),utf_enc(a[2]),int(a[3])),
+                                  lambda a: (utf_dec(a[0]),utf_dec(a[1]),utf_dec(a[2]),int(a[3]))))
   MAKE_DIRECTORY        = TypeInfo(bytes([16]),"!{}s".format(_file_size),("Directory"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
@@ -219,7 +219,7 @@ MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.AUTH_SUBJECT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PULL_FILE)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)
-MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.OKAY)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_CLIENT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_SUBJECT_SERVER)

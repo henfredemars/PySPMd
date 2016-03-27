@@ -22,11 +22,11 @@ class Database:
   tables = ["create table if not exists subjects(subject text primary key, password text not null, type text not null, super integer not null)",
 	    "create table if not exists links(subject1 text not null, subject2 text not null, primary key (subject1,subject2))",
 	    "create table if not exists filters(type1 text not null, type2 text not null,ticket ticket not null, primary key (type1,type2,ticket))",
-	    "create table if not exists rights(subject1 text not null, ticket ticket not null, target text not null, object integer not null, primary key (subject1,ticket,target,object))",
+	    "create table if not exists rights(subject text not null, ticket ticket not null, target text not null, isobject integer not null, primary key (subject,ticket,target,isobject))",
 	    "create table if not exists objects(localpath text primary key, dir integer not null)"]
 
   #Setup automatic type conversions
-  sqlite3.register_adapter("Ticket",Ticket.adapt_ticket)
+  sqlite3.register_adapter(Ticket,Ticket.adapt_ticket)
   sqlite3.register_converter("Ticket",Ticket.convert_ticket)
 
   def __init__(self,db="./sys.db",root="./fileroot"):
@@ -191,7 +191,7 @@ class Database:
       raise DatabaseError("Target cannot be empty")
     if not ticket:
       raise DatabaseError("No ticket provided")
-    self.c.execute("select subject,ticket,target,object from rights where subject=? and ticket=? and target=? and isobject=?",
+    self.c.execute("select subject,ticket,target,isobject from rights where subject=? and ticket=? and target=? and isobject=?",
 	(subject,ticket,target,isobject))
     t = self.c.fetchone()
     if t:
@@ -210,7 +210,7 @@ class Database:
     except AssertionError:
       raise DatabaseError("Not a vaild ticket")
     self.c.execute("begin transaction")
-    self.c.execute("delete from rights where subject=? and ticket=? and target=? and object=?",
+    self.c.execute("delete from rights where subject=? and ticket=? and target=? and isobject=?",
 	(subject,ticket,target,isobject))
     self.c.execute("end transaction")
 

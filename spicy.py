@@ -37,6 +37,7 @@ class SpicyTerminal(Cmd):
       return super().onecmd(s)
     except Exception as e:
       print(e)
+      raise
       return False
 
   def postcmd(self,stop,line):
@@ -156,7 +157,7 @@ class SpicyTerminal(Cmd):
     if not self.client or not self.client.connected:
       print("No active connection")
     else:
-      self.client.getFile(os.path.basename(remotename),localname)
+      self.client.sendFile(os.path.basename(localname),localname)
 
   def do_lrm(self,file):
     """[lrm file] delete a single file from the local directory"""
@@ -168,6 +169,52 @@ class SpicyTerminal(Cmd):
       print("No active connection")
     else:
       self.client.deleteFile(file)
+
+  def do_gt(self,line):
+    """[gt subject target ticket isobject] grant a rights ticket"""
+    args = line.split()
+    if not self.client or not self.client.connected:
+      print("No active connection")
+      return
+    if len(args) != 4:
+      print("Not enough arguments")
+    else:
+      subject = args[0]
+      target = args[1]
+      ticket = args[2]
+      isobject = args[3].lower() == "true"
+      self.client.giveTicketSubject(subject,ticket,target,isobject)
+
+  def do_tt(self,line):
+    """[tt subject target ticket isobject] take (remove) a rights ticket"""
+    args = line.split()
+    if not self.client or not self.client.connected:
+      print("No active connection")
+      return
+    if len(args) != 4:
+      print("Not enough arguments")
+    else:
+      subject = args[0]
+      target = args[1]
+      ticket = args[2]
+      isobject = args[3].lower() == "true"
+      self.client.takeTicketSubject(subject,ticket,target,isobject)
+
+  def do_xt(self,line):
+    """[xt subject1 subject2 target ticket isobject] xfer a rights ticket"""
+    args = line.split()
+    if not self.client or not self.client.connected:
+      print("No active connection")
+      return
+    if len(args) != 4:
+      print("Not enough arguments")
+    else:
+      subject1 = args[0]
+      subject2 = args[1]
+      target = args[2]
+      ticket = args[3]
+      isobject = args[4].lower() == "true"
+      self.client.xfterTicketSubject(subject1,subject2,ticket,target,isobject)
   
 def main():
   SpicyTerminal().cmdloop()
