@@ -33,7 +33,7 @@ class Protocol(asyncio.Protocol):
     self.hmacf = None
     self.fd = None
     self.cd = "/"
-    self.pwd = os.getcwd()
+    self.pwd = os.path.join(os.getcwd(),db.root)
     self.write_lock = asyncio.Lock()
 
   def pause_writing(self):
@@ -127,7 +127,7 @@ class Protocol(asyncio.Protocol):
           self.stream = RC4(key)
           self.hmacf = make_hmacf(key)
           out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)].build([
-            target_entry.subject],self.stream,self.hmacf)
+            target],self.stream,self.hmacf)
           self.subject = None
         await self.sendall(out_data)
       except DatabaseError:
@@ -204,7 +204,7 @@ class Protocol(asyncio.Protocol):
         await self.sendall(msg_block)
       await self.sendTaskDone()
     elif msg_type == MessageType.LIST_OBJECT_CLIENT:
-      objects = os.path.listdir(expandPath(self.pwd,self.cd,localpath))
+      objects = os.listdir(expandPath(self.pwd,self.cd,""))
       s_lists = chunks(objects,_ls_count)
       for list in s_lists:
         while len(list) < _ls_count:
@@ -253,6 +253,28 @@ class Protocol(asyncio.Protocol):
         return
       db.deleteRight(subject,ticket,target,isObject)
       await self.sendTaskDone()
+    elif msg_type == MessageType.XFER_TICKET:
+      try:
+        subject1 = db.getSubject(msg_dict["Subject1"])
+        subject2 = db.getSubject(msg_dict["Subject1"])
+        ticket = Ticket(msg_dict["Ticket"])
+        target = db.getSubject(msg_dict["Target"])
+        isObject = bool(msg_dict["IsObject"])
+        if not subject1 or not subject2 or not target:
+          await self.sendError("No such subject")
+          return
+        else:
+          subject = subject.subject
+          target = target.subject
+      except BadTicketError:
+        await self.sendError("BadTicketError")
+        return
+      except DatabaseError:
+        await self.sendError("DatabaseError")
+        return
+      db.deleteRight(subject1,ticket,target,isObject)
+      db.insertRight(subject1,ticket,target,isObject)
+      await self.sendTaskDone()
     elif msg_type == MessageType.MAKE_DIRECTORY:
       directory = msg_dict["Directory"]
       abs_path = expandPath(self.pwd,self.cd,directory)
@@ -285,7 +307,7 @@ class Protocol(asyncio.Protocol):
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.CD:
-      path = msg_type["Path"]
+      path = msg_dict["Path"]
       abs_path = expandPath(self.pwd,self.cd,path)
       rel_path = expandPath("/",self.cd,path)
       if os.path.isdir(abs_path):
@@ -293,6 +315,10 @@ class Protocol(asyncio.Protocol):
         await self.sendTaskDone()
       else:
         await self.sendError("Path does not appear to exist")
+    elif msg_type == MessageType.GET_CD:
+      msg_encoded = strategies[(MessageClass.PRIVATE_MSG,MessageType.CD)].build([self.cd],
+                                                          self.stream,self.hmacf)
+      await self.sendall(msg_encoded)
     elif msg_type == MessageType.MAKE_FILTER:
       type1 = msg_dict["Type1"]
       type2 = msg_dict["Type2"]

@@ -9,7 +9,7 @@ from SPM.Util import log
 
 from . import _msg_size, _subject_size, _password_size, _lss_count
 from . import _file_size, _hash_size, _ticket_size, _ls_count, _type_size
-from . import _error_msg_size, _salt_size, _data_size
+from . import _error_msg_size, _salt_size, _data_size, _file_path_size
 
 #Messages
 
@@ -35,10 +35,10 @@ class MessageType(Enum):
                                   lambda a: map(int,a)))
   DIE                   = TypeInfo(bytes([2]),None,None,
                             Codec(None,None))
-  PULL_FILE             = TypeInfo(bytes([3]),"!{}s".format(_file_size),("File Name",),
+  PULL_FILE             = TypeInfo(bytes([3]),"!{}s".format(_file_path_size),("File Name",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  PUSH_FILE             = TypeInfo(bytes([4]),"!{}s".format(_file_size),("File Name",),
+  PUSH_FILE             = TypeInfo(bytes([4]),"!{}s".format(_file_path_size),("File Name",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   XFER_FILE             = TypeInfo(bytes([5]),"!{}sH".format(_data_size),("Data","BSize"),
@@ -79,7 +79,7 @@ class MessageType(Enum):
   MAKE_SUBJECT          = TypeInfo(bytes([17]),"!{}s{}s{}s".format(_subject_size,_password_size,_type_size),("Subject","Password","Type"),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
-  CD                    = TypeInfo(bytes([18]),"!{}s".format(_file_size),("Path",),
+  CD                    = TypeInfo(bytes([18]),"!{}s".format(_file_path_size),("Path",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
   MAKE_FILTER           = TypeInfo(bytes([19]),"!{0}s{0}s{1}s".format(_type_size,_ticket_size),("Type1","Type2","Ticket"),
@@ -97,6 +97,12 @@ class MessageType(Enum):
   DELETE_SUBJECT        = TypeInfo(bytes([23]),"!{}s".format(_subject_size),("Subject",),
                             Codec(lambda a: map(utf_enc,a),
                                   lambda a: map(utf_dec,a)))
+  XFER_TICKET           = TypeInfo(bytes([24]),"!{0}s{0}s{1}s{0}sB".format(_subject_size,_ticket_size),
+                                   ("Subject1","Subject2","Ticket","Target","IsObject"),
+                            Codec(lambda a: map(utf_enc,a),
+                                  lambda a: map(utf_dec,a)))
+  GET_CD                = TypeInfo(bytes([25]),None,None,
+                            Codec(None,None))
 
 class MessageClass(Enum):
   PUBLIC_MSG = bytes([0])
@@ -221,14 +227,15 @@ MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_OBJECT_CLIENT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.LIST_OBJECT_SERVER)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.GIVE_TICKET_SUBJECT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.TAKE_TICKET_SUBJECT)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.XFER_TICKET)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_DIRECTORY)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_SUBJECT)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_FILTER)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.MAKE_LINK)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CD)
-MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.DELETE_FILE)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.GET_CD)
+MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.DELETE_PATH)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CLEAR_LINKS)
-MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.CLEAR_FILTERS)
 MessageStrategy(MessageClass.PRIVATE_MSG,MessageType.DELETE_SUBJECT)
 
 #Table of strategies for building messages

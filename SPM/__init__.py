@@ -15,6 +15,7 @@ _type_size = _subject_size
 _password_size = 64
 _salt_size = 32
 _file_size = 256
+_file_path_size = 1024
 _data_size = (_msg_size-(2+2+_hash_size))
 _error_msg_size = (_msg_size-(2+_hash_size))
 _hash_rounds = 2**4
