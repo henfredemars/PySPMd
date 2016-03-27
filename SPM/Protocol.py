@@ -2,7 +2,6 @@
 import asyncio
 import hashlib
 import random
-import shutil
 import os
 
 from . import __version__, _msg_size, _hash_rounds, _data_size, _min_pass_len
@@ -70,8 +69,8 @@ class Protocol(asyncio.Protocol):
     else:
       log("%s connection closed" % self.peerinfo[0])
 
-  async def sendTaskDone(self):
-    await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TASK_DONE)].build(
+  async def sendOkay(self):
+    await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.OKAY)].build(
                                 None,self.stream,self.hmacf))
 
   def data_received(self,data):
@@ -149,6 +148,7 @@ class Protocol(asyncio.Protocol):
       except IOError:
         await self.sendError("IOError")
         return
+      await self.sendOkay()
       log("Opened '{}' for writing after object insertion".format(localpath))
       self.status = Status.PULLING
     elif msg_type == MessageType.PULL_FILE:
@@ -173,13 +173,14 @@ class Protocol(asyncio.Protocol):
         return
       log("Opened '{}' for reading".format(localpath))
       self.status = Status.PUSHING
+      await self.sendOkay()
       data = self.fd.read(_data_size)
       while data:
         out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_FILE)].build(
                                 [data,len(data)],self.stream,self.hmacf)
         await self.sendall(out_data)
         data = self.fd.read(_data_size)
-      await self.sendTaskDone()
+      await self.sendOkay()
       self.status = Status.NORMAL
     elif msg_type == MessageType.XFER_FILE:
       if self.status == Status.PULLING:
@@ -187,7 +188,7 @@ class Protocol(asyncio.Protocol):
         self.fd.write(msg_dict["Data"][:msg_dict["BSize"]])
       else:
         await self.sendError("Ambiguous message sequence")
-    elif msg_type == MessageType.TASK_DONE:
+    elif msg_type == MessageType.OKAY:
       if self.fd:
         self.fd.close()
       self.fd = None
@@ -202,7 +203,7 @@ class Protocol(asyncio.Protocol):
                  .build(s_list,self.stream,self.hmacf),s_lists)
       for msg_block in msgs:
         await self.sendall(msg_block)
-      await self.sendTaskDone()
+      await self.sendOkay()
     elif msg_type == MessageType.LIST_OBJECT_CLIENT:
       objects = os.listdir(expandPath(self.pwd,self.cd,""))
       s_lists = chunks(objects,_ls_count)
@@ -213,68 +214,94 @@ class Protocol(asyncio.Protocol):
                  .build(s_list,self.stream,self.hmacf),s_lists)
       for msg_block in msgs:
         await self.sendall(msg_block)
-      await self.sendTaskDone()
+      await self.sendOkay()
     elif msg_type == MessageType.GIVE_TICKET_SUBJECT:
       try:
         subject = db.getSubject(msg_dict["Subject"])
         ticket = Ticket(msg_dict["Ticket"])
-        target = db.getSubject(msg_dict["Target"])
         isObject = bool(msg_dict["IsObject"])
-        if not subject or not target:
+        if isObject:
+          target = expandPath("/",self.cd,msg_dict["Target"])
+          if not os.path.exists(expandPath(self.pwd,"/",target)):
+            await self.sendError("No such target object")
+            return
+        else:
+          target = db.getSubject(msg_dict["Target"])
+          if not target:
+            await self.sendError("No such subject")
+            return
+          target = target.subject
+        if not subject:
           await self.sendError("No such subject")
           return
         else:
           subject = subject.subject
-          target = target.subject
       except BadTicketError:
         await self.sendError("BadTicketError")
         return
       except DatabaseError:
         await self.sendError("DatabaseError")
       db.insertRight(subject,ticket,target,isObject)
-      await self.sendTaskDone()
+      await self.sendOkay()
     elif msg_type == MessageType.TAKE_TICKET_SUBJECT:
       try:
         subject = db.getSubject(msg_dict["Subject"])
         ticket = Ticket(msg_dict["Ticket"])
-        target = db.getSubject(msg_dict["Target"])
         isObject = bool(msg_dict["IsObject"])
-        if not subject or not target:
+        if isObject:
+          target = expandPath("/",self.cd,msg_dict["Target"])
+          if not os.path.exists(expandPath(self.pwd,"/",target)):
+            await self.sendError("No such target object")
+            return
+        else:
+          target = db.getSubject(msg_dict["Target"])
+          if not target:
+            await self.sendError("No such subject")
+            return
+          target = target.subject
+        if not subject:
           await self.sendError("No such subject")
           return
         else:
           subject = subject.subject
-          target = target.subject
       except BadTicketError:
         await self.sendError("BadTicketError")
         return
       except DatabaseError:
         await self.sendError("DatabaseError")
-        return
       db.deleteRight(subject,ticket,target,isObject)
-      await self.sendTaskDone()
+      await self.sendOkay()
     elif msg_type == MessageType.XFER_TICKET:
       try:
         subject1 = db.getSubject(msg_dict["Subject1"])
-        subject2 = db.getSubject(msg_dict["Subject1"])
+        subject2 = db.getSubject(msg_dict["Subject2"])
         ticket = Ticket(msg_dict["Ticket"])
-        target = db.getSubject(msg_dict["Target"])
         isObject = bool(msg_dict["IsObject"])
-        if not subject1 or not subject2 or not target:
+        if isObject:
+          target = expandPath("/",self.cd,msg_dict["Target"])
+          if not os.path.exists(expandPath(self.pwd,"/",target)):
+            await self.sendError("No such target object")
+            return
+        else:
+          target = db.getSubject(msg_dict["Target"])
+          if not target:
+            await self.sendError("No such subject")
+            return
+          target = target.subject
+        if not subject1 or not subject2:
           await self.sendError("No such subject")
           return
         else:
-          subject = subject.subject
-          target = target.subject
+          subject1 = subject1.subject
+          subject2 = subject2.subject
       except BadTicketError:
         await self.sendError("BadTicketError")
         return
       except DatabaseError:
         await self.sendError("DatabaseError")
-        return
+      db.insertRight(subject2,ticket,target,isObject)
       db.deleteRight(subject1,ticket,target,isObject)
-      db.insertRight(subject1,ticket,target,isObject)
-      await self.sendTaskDone()
+      await self.sendOkay()
     elif msg_type == MessageType.MAKE_DIRECTORY:
       directory = msg_dict["Directory"]
       abs_path = expandPath(self.pwd,self.cd,directory)
@@ -285,7 +312,7 @@ class Protocol(asyncio.Protocol):
       try:
         db.insertObject(rel_path,True)
         os.makedirs(abs_path)
-        await self.sendTaskDone()
+        await self.sendOkay()
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.MAKE_SUBJECT:
@@ -303,7 +330,7 @@ class Protocol(asyncio.Protocol):
           await self.sendError("Subject must have a type")
           return
         db.insertSubject(msg_dict["Subject"],password,stype,False)
-        await self.sendTaskDone()
+        await self.sendOkay()
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.CD:
@@ -312,7 +339,7 @@ class Protocol(asyncio.Protocol):
       rel_path = expandPath("/",self.cd,path)
       if os.path.isdir(abs_path):
         self.cd = rel_path
-        await self.sendTaskDone()
+        await self.sendOkay()
       else:
         await self.sendError("Path does not appear to exist")
     elif msg_type == MessageType.GET_CD:
@@ -337,13 +364,16 @@ class Protocol(asyncio.Protocol):
           subject1 = subject1.subject
           subject2 = subject2.subject
           db.insertLink(subject1,subject2)
-          await self.sendTaskDone()
+          await self.sendOkay()
       except DatabaseError:
         await self.sendError("DatabaseError")
     elif msg_type == MessageType.DELETE_PATH:
       path = msg_dict["Path"]
-      abs_path = expandPath(self.pwd,self.cd,path)
-      shutil.rmtree(abs_path)
+      try:
+        db.deleteObject(expandPath("/",self.cd,path))
+        await self.sendOkay()
+      except DatabaseError:
+        await self.sendError("DatabaseError")
     elif msg_type == MessageType.CLEAR_LINKS:
       subject = msg_dict["Subject"]
       if not subject:
