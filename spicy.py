@@ -8,7 +8,7 @@ from cmd import Cmd
 from SPM.Database import Database
 from SPM.Client import Client
 
-#An interactive command-line interface for 
+#An interactive command-line interface for PySPMd
 
 INJECT_DEFAULT = True
 
