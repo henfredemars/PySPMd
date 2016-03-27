@@ -6,6 +6,13 @@ Python daemon and client library implementing a variant of the Schematic Protect
 * Superusers are not required to obey the model
 * Rights not enforced by the daemon, only recorded and reported
 
+# Technical Information
+* Encryption is performed using RC4-DROP-2048 with SHA1 authentication
+* PCKS7 is used as the key dervation function from a shared secret password
+* Each connection uses a nonce, protecting the client information
+* Server authentication is performed by key derviation with shared secret
+* Async and fully non-blocking IO
+
 # Notable Contents
 
 ```
