@@ -31,6 +31,7 @@ class Client():
     self.buf = bytearray()
 
   def readMessage(self):
+    """Perform a buffered read from the socket"""
     while len(self.buf) < _msg_size:
       self.buf.extend(self.socket.recv(4096))
     msg_dict = MessageStrategy.parse(self.buf[0:_msg_size],self.stream,self.hmacf)
@@ -38,9 +39,11 @@ class Client():
     return msg_dict    
 
   def connected(self):
+    """Check if the client has an active connection"""
     return self.connected
 
   def greetServer(self):
+    """Send the server greeting and establish compatible client and server versions"""
     self.socket.connect((self.addr,self.port))
     self.socket.sendall(strategies[(MessageClass.PUBLIC_MSG,MessageType.HELLO_CLIENT)].build([__version__]))
     msg_dict = self.readMessage()
@@ -51,10 +54,11 @@ class Client():
       if msg_dict["Version"] != __version__:
         self.socket.close()
         raise ClientError("Server version mismatch")
-    log("Successful connection.")
+    log("Successfully opened a new unauthenticated connection.")
     self.connected = True
 
   def authenticate(self,subject,password):
+    """Authenticate as a subject and establish encryption"""
     log("Authenticating...")
     if not self.connected:
       raise ClientError("Not connected to a server")
@@ -81,6 +85,7 @@ class Client():
       return False
 
   def listSubjects(self):
+    """List all valid subjects on the server (requires authentication)"""
     if not self.connected:
       raise ClientError("Not connected to a server")
     if not self.stream:
@@ -99,10 +104,11 @@ class Client():
     return [subject for subject in subjects if subject]
 
   def listObjects(self):
+    """List all valid objects on the server (requires authentication)"""
     if not self.connected:
       raise ClientError("Not connected to a server")
     if not self.stream:
-      raise ClientError("Cannot list subjects unless authenticated")
+      raise ClientError("Cannot list objects unless authenticated")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.LIST_OBJECT_CLIENT)].build(
                         None,self.stream,self.hmacf))
     objects = []
@@ -116,39 +122,91 @@ class Client():
       raise ClientError("Unexpected message sequence")
     return [object for object in objects if object]
 
-  def giveTicketSubject(subject,ticket):
+  def cd(self,remotepath):
+    """Change virtual remote path on the server"""
     if not self.connected:
       raise ClientError("Not connected to a server")
     if not self.stream:
-      raise ClientError("Cannot list subjects unless authenticated")
+      raise ClientError("Must be authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.CD)].build(
+                        [remotepath],self.stream,self.hmacf))
+    msg_dict = self.readMessage()
+    if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
+      raise ClientError("ServerError: %s" % msg_dict["Error Message"])
+
+  def pwd(self):
+    """Get current remote working directory"""
+    if not self.connected:
+      raise ClientError("Not connected to a server")
+    if not self.stream:
+      raise ClientError("Must be authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.GET_CD)].build(
+                        None,self.stream,self.hmacf))
+    msg_dict = self.readMessage()
+    if msg_dict["MessageType"] == MessageType.CD:
+      return msg_dict["Path"]
+    else:
+      raise ClientError("Unexpected message from the server")
+
+  def giveTicketSubject(subject,ticket,target,isObject):
+    """Force a subject to receive a ticket. Requires a super authenticated connection"""
+    if not self.connected:
+      raise ClientError("Not connected to a server")
+    if not self.stream:
+      raise ClientError("Must be authenticated")
+    if not all([subject,ticket,target]):
+      raise ClientError("Missing a subject")
     if not isinstance(ticket,Ticket):
       try:
         ticket = Ticket(ticket)
       except BadTicketError:
         raise ClientError("Bad ticket")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.GIVE_TICKET_SUBJECT)]
-                        .build([subject,repr(ticket)],self.stream,self.hmacf))
+                        .build([subject,repr(ticket),target,isObject],self.stream,self.hmacf))
     msg_dict = self.readMessage()
     if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
       raise ClientError("ServerError: %s" % msg_dict["Error Message"])
 
-  def takeTicketSubject(subject,ticket):
+  def takeTicketSubject(subject,ticket,target,isObject):
+    """Force a subject to drop a ticket. Requires a super authenticated connection"""
     if not self.connected:
       raise ClientError("Not connected to a server")
     if not self.stream:
-      raise ClientError("Cannot list subjects unless authenticated")
+      raise ClientError("Must be authenticated")
+    if not all([subject,ticket,target]):
+      raise ClientError("Missing a subject")
     if not isinstance(ticket,Ticket):
       try:
         ticket = Ticket(ticket)
       except BadTicketError:
         raise ClientError("Bad ticket")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.TAKE_TICKET_SUBJECT)]
-                        .build([subject,repr(ticket)],self.stream,self.hmacf))
+                        .build([subject,repr(ticket),target,isObject],self.stream,self.hmacf))
+    msg_dict = self.readMessage()
+    if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
+      raise ClientError("ServerError: %s" % msg_dict["Error Message"])
+
+  def xferTicketSubject(subject1,subject2,ticket,target,isObject):
+    """Ask a subject to transfer an existing ticket. Requires an authenticated connection"""
+    if not self.connected:
+      raise ClientError("Not connected to a server")
+    if not self.stream:
+      raise ClientError("Must be authenticated")
+    if not all([subject1,subject2,ticket,target]):
+      raise ClientError("Missing a subject")
+    if not isinstance(ticket,Ticket):
+      try:
+        ticket = Ticket(ticket)
+      except BadTicketError:
+        raise ClientError("Bad ticket")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.XFER_TICKET_SUBJECT)]
+                        .build([subject1,subject2,repr(ticket),target,isObject],self.stream,self.hmacf))
     msg_dict = self.readMessage()
     if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
       raise ClientError("ServerError: %s" % msg_dict["Error Message"])
 
   def sendFile(self,remotename,localpath):
+    """Send a file from a localpath to a remotepath"""
     if not os.path.isfile(localpath):
       raise ClientError("File does not exist")
     if not self.connected:
@@ -156,7 +214,7 @@ class Client():
     if not self.subject or not self.stream:
       raise ClientError("Not authenticated")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.PUSH_FILE)].build(
-                        [os.path.basename(remotename)],self.stream,self.hmacf))
+                        [remotename],self.stream,self.hmacf))
     with open(localpath,"rb") as fd:
       data = fd.read(_data_size)
       while data:
@@ -167,6 +225,7 @@ class Client():
           None,self.stream,self.hmacf))
 
   def getFile(self,remotename,localpath):
+    """Download a file from a remote to a local path"""
     if os.path.isfile(localpath):
       raise ClientError("File exists")
     if not self.connected:
@@ -174,7 +233,7 @@ class Client():
     if not self.subject or not self.stream:
       raise ClientError("Not authenticated")
     self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.PULL_FILE)].build(
-                        [os.path.basename(remotename)],self.stream,self.hmacf))
+                        [remotename],self.stream,self.hmacf))
     with open(localpath,"wb") as fd:
       msg_dict = self.readMessage()
       while msg_dict["MessageType"] == MessageType.XFER_FILE:
@@ -184,7 +243,15 @@ class Client():
         raise ClientError("ServerError: %s" % str(msg_dict["Error Message"]))
       elif msg_dict["MessageType"] != MessageType.TASK_DONE:
         raise ClientError("Unexpected message sequence")
-      
+
+  def deleteFile(self,remotename):
+    """Delete a file from a remote path"""
+    if not self.connected:
+      raise ClientError("No active connection")
+    if not self.subject or not self.stream:
+      raise ClientError("Not authenticated")
+    self.socket.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.DELETE_PATH)].build(
+                        [remotename],self.stream,self.hmacf))
 
   def resetConnection(self):
     self.stream = None
@@ -196,6 +263,12 @@ class Client():
   def leaveServer(self):
     if not self.connected:
       return
+    self.close()
+    self.__init__(self.addr,self.port)
+
+  def close(self):
+    if not self.connected:
+      return
     self.socket.sendall(strategies[(MessageClass.PUBLIC_MSG,MessageType.DIE)].build(None,self.stream,self.hmacf))
     self.socket.close()
-    self.__init__(self.addr,self.port)
+
