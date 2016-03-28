@@ -179,6 +179,7 @@ class MessageStrategy:
       if compare_digest(hmacf(msg_buf[1:-_hash_size]),msg_buf[-_hash_size:]):
         msg_buf = msg_buf[0:1] + stream.xor(msg_buf[1:-_hash_size])
       else:
+        stream.xor(msg_buf[1:-_hash_size]) #Spend RC4 to keep sync in case of corruption
         raise BadMessageError("Message integrity check failure")
     msg_type = MessageStrategy.detect_type(msg_buf)
     if not (msg_class,msg_type) in strategies:
