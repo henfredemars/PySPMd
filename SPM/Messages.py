@@ -17,11 +17,12 @@ from . import _error_msg_size, _salt_size, _data_size, _file_path_size
 TypeInfo = namedtuple("TypeInfo",["bc","fmt","args","codec"])
 Codec = namedtuple("Codec",["enc","dec"])
 
+#Shorthand notation for UTF encoding and decoding
 utf_enc = lambda a: str(a).encode(encoding="UTF-8",errors="ignore")
 utf_dec = lambda a: (a.decode(encoding="UTF-8",errors="ignore")).strip("\0")
-ident   = lambda a: a
 
 class BadMessageError(RuntimeError):
+  """Wrapper around RuntimeError for catching exceptions for bad messages"""
   def __init__(self,message):
     super().__init__(message)
     log("BadMessageError: " + message)
@@ -129,6 +130,7 @@ class MessageStrategy:
 
   @staticmethod
   def detect_class(msg_buf):
+    """Determine the message class from the block header"""
     if msg_buf[0:1] == MessageClass.PUBLIC_MSG.value:
       return MessageClass.PUBLIC_MSG
     elif msg_buf[0:1] == MessageClass.PRIVATE_MSG.value:
@@ -138,11 +140,13 @@ class MessageStrategy:
   @staticmethod
   def detect_type(msg_buf):
     for msg_type in MessageType:
+      """Detect the message type of a decrypted message"""
       if msg_buf[1:2] == msg_type.value.bc:
         return msg_type
     raise BadMessageError("Failed to detect message type")
       
   def build(self,args=None,stream=None,hmacf=None):
+    """Assemble a message of this type, encrypting if possible"""
     if self.arg_count:
       assert len(args)==self.arg_count
     else:
@@ -169,6 +173,7 @@ class MessageStrategy:
 
   @staticmethod
   def parse(msg_buf,stream=None,hmacf=None):
+    """Parse a potentially-encrypted message into an argument dictionary"""
     assert msg_buf
     assert bool(stream) == bool(hmacf)
     assert len(msg_buf) == _msg_size
@@ -207,6 +212,7 @@ class MessageStrategy:
     return msg_dict
     
   def __repr__(self):
+    """String representation of the message strategy"""
     str(self.__class__) + ": " + str(self.__dict__)
 
 #Public messages
