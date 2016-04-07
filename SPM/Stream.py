@@ -1,10 +1,10 @@
 
 import hmac
-import base64
 
 #Stream
 
 class RC4:
+  """Implementation of RC4-DROP-2048 stream cipher"""
 
   def __init__(self,key):
     self.key = bytearray(key)
@@ -17,6 +17,7 @@ class RC4:
     self.getBytes(2048)
 
   def getBytes(self,bs):
+    """Read bytes from the keystream"""
     i = 0
     j = 0
     stream = bytearray()
@@ -28,22 +29,16 @@ class RC4:
     return stream
 
   def xor(self,data):
+    """XOR a block of data with fresh bytes from the keystream"""
     data = bytearray(data)
     stream = self.getBytes(len(data))
     return bytearray(map(lambda b: b[0]^b[1],zip(data,stream)))
 
-  def encrypt(self,msg):
-    msg = bytes(msg)
-    return (base64.encode(self.xor(msg)).decode(encoding='ASCII',errors="strict") + "\n"
-            ).encode('UTF-8',errors="strict")
-  
-  def decrypt(self,msg):
-    msg = bytes(msg)
-    return self.xor(base64.decode((msg.decode('UTF-8',errors="ignore").strip()).encode('ASCII')))
-
 def make_hmacf(key):
+  """Build a function for message signing"""
   return (lambda msg: make_hmacf_single_use(key)(msg))
 
 def make_hmacf_single_use(key):
+  """Build a function for signing a single message, internal use only"""
   hmac_obj = hmac.new(bytes(key),msg=None,digestmod='sha1')
   return lambda msg: hmac_obj.update(msg) or hmac_obj.digest()

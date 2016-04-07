@@ -9,6 +9,7 @@ from SPM.Database import Database
 #Test of the server and client libraries
 
 def main():
+  """Basic full-connectivity test script"""
   with Database() as db:
     if not db.getSubject("admin"):
       db.insertSubject("admin","password","main",True)
@@ -38,6 +39,7 @@ def main():
   client.leaveServer()
 
 def md5_file(fname):
+  """Compute the MD5 hash of a file"""
   h = hashlib.md5()
   with open(fname, "rb") as f:
     for block in iter(lambda: f.read(4096), b""):

@@ -35,17 +35,21 @@ class Protocol(asyncio.Protocol):
     self.write_lock = asyncio.Lock()
 
   def pause_writing(self):
+    """Handle request to stop filling the output buffer"""
     self.loop.create_task(self.write_enable.acquire())
 
   def resume_writing(self):
+    """Handle request to resume writing to the output buffer"""
     self.write_enable.release()
 
   async def sendall(self,data):
+    """Coroutine to send a block of data to the output buffer if we may write"""
     await self.write_lock.acquire()
     self.transport.write(data)
     self.write_lock.release()
 
   async def sendError(self,msg):
+    """Coroutine to send an error message safely"""
     if self.stream:
       msg = strategies[(MessageClass.PRIVATE_MSG,MessageType.ERROR_SERVER)].build(
                             [msg],self.stream,self.hmacf)
@@ -57,29 +61,34 @@ class Protocol(asyncio.Protocol):
       pass
 
   def connection_made(self,transport):
+    """Handle the new connection event"""
     self.transport = transport
-    self.transport.set_write_buffer_limits(500000,0)
+    self.transport.set_write_buffer_limits(10000,0)
     self.peerinfo = transport.get_extra_info("peername")
     log("Connection from %s:%s" % self.peerinfo)
 
   def connection_lost(self,exc):
+    """Handle both unexpected and normal connection loss"""
     if exc:
       log("Lost connection with %s" % self.peerinfo[0])
     else:
       log("%s connection closed" % self.peerinfo[0])
 
   async def sendOkay(self):
+    """Coroutine to send a confirmation message"""
     await self.sendall(strategies[(MessageClass.PRIVATE_MSG,MessageType.OKAY)].build(
                                 None,self.stream,self.hmacf))
 
   def data_received(self,data):
+    """Handle new block of data received"""
     self.buf.extend(data)
     while len(self.buf) >= _msg_size:
       self.loop.create_task(self.dispatch_msg_block(self.buf[0:_msg_size]))
       self.buf = self.buf[_msg_size:]
 
   async def dispatch_msg_block(self,msg_block):
-    #Leave immidiately if the transport is closing
+    """Handle a message block"""
+    #Leave immidiately if the transport is closed or closing
     if self.transport.is_closing():
       return
     #Try to parse the (possibly evil) message

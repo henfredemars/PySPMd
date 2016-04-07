@@ -25,6 +25,7 @@ class SpicyTerminal(Cmd):
     self.intro = "Spicy PySPMd interpreter. Type 'help' for a list of commands."
 
   def updatePrompt(self):
+    """Ensure the prompt continues to reflect the current directory"""
     self.prompt = self.prompt_h % os.getcwd()
     self.prompt = self.prompt.replace(self.userpath,"~")
 
@@ -272,6 +273,7 @@ class SpicyTerminal(Cmd):
       
   
 def main():
+  """Enter the command interpreter loop"""
   SpicyTerminal().cmdloop()
 
 def prep_sys():

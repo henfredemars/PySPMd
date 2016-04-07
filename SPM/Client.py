@@ -15,10 +15,12 @@ strategies = MessageStrategy.strategies
 #Server
 
 class ClientError(RuntimeError):
+  """Simple ClientError error type"""
   def __init__(self,msg):
     super().__init__(msg)
 
 class Client():
+  """Client library interface object"""
 
   def __init__(self,addr,port):
     self.addr = addr
@@ -40,6 +42,7 @@ class Client():
     return msg_dict
 
   def checkOkay(self):
+    """Check for confirmation. If no confirmation, throw the error message"""
     msg_dict = self.readMessage()
     if msg_dict["MessageType"] == MessageType.ERROR_SERVER:
       raise ClientError("ErrorServer: %s" % msg_dict["Error Message"])
@@ -335,6 +338,7 @@ class Client():
     self.checkOkay()
 
   def resetConnection(self):
+    """Return the connection to its original state after greeting"""
     self.stream = None
     self.hmacf = None
     self.leaveServer()
@@ -342,12 +346,14 @@ class Client():
     self.greetServer()
 
   def leaveServer(self):
+    """Disconnect from the server, preparing for any future connections"""
     if not self.connected:
       return
     self.close()
     self.__init__(self.addr,self.port)
 
   def close(self):
+    """Disconnect from the server if connected. Do not re-initialize the Client"""
     if not self.connected:
       return
     self.socket.sendall(strategies[(MessageClass.PUBLIC_MSG,MessageType.DIE)].build(None,self.stream,self.hmacf))

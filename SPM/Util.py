@@ -5,6 +5,7 @@ import os
 from . import _debug, _debug_width
 
 def log(msg):
+  """Log a message if the _debug flag has been set"""
   if not _debug:
     return
   msg = msg.strip()
@@ -14,10 +15,12 @@ def log(msg):
     print(msg[:(_debug_width-3)] + "...")
 
 def chunks(l, n):
-    n = max(1, n)
-    return [l[i:i+n] for i in range(0, len(l), n)]
+  """Break a list into chunks of size N"""
+  n = max(1, n)
+  return [l[i:i+n] for i in range(0, len(l), n)]
 
 def expandPath(root,cd,local):
+  """Get full real path given the root, current directory, and localpath of an object"""
   assert root
   if local.startswith(os.sep):
     cd = ""
