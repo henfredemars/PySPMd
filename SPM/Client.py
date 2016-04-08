@@ -12,7 +12,7 @@ from SPM.Util import log
 
 strategies = MessageStrategy.strategies
 
-#Server
+#Client
 
 class ClientError(RuntimeError):
   """Simple ClientError error type"""

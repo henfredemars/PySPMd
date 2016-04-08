@@ -213,7 +213,7 @@ class MessageStrategy:
     
   def __repr__(self):
     """String representation of the message strategy"""
-    str(self.__class__) + ": " + str(self.__dict__)
+    return str(self.__class__) + ": " + str(self.__dict__)
 
 #Public messages
 MessageStrategy(MessageClass.PUBLIC_MSG,MessageType.HELLO_SERVER)
