@@ -22,6 +22,7 @@ class DatabaseError(RuntimeError):
     super().__init__(msg)
 
 class Database:
+  """Database interface object"""
 
   #Declare the database schema
   tables = ["create table if not exists subjects(subject text primary key, password text not null, type text not null, super integer not null)",

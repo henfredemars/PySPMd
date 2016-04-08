@@ -9,6 +9,7 @@ from SPM.Util import log
 #Server
 
 class Server():
+  """Server object encapsulates a server instance and its data"""
 
   def __init__(self,bind,port):
     if not SPM.Protocol.db:
