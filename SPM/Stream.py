@@ -34,6 +34,32 @@ class RC4:
     stream = self.getBytes(len(data))
     return bytearray(map(lambda b: b[0]^b[1],zip(data,stream)))
 
+class AES:
+  """Use PyCrypto implementation of AES in counter mode"""
+
+  def __init__(self,key):
+    from Crypto.Cipher import AES
+    self.key = bytearray(key)
+    assert len(key)==256
+    self.impl = AES.new(key,AES.MODE_CTR)
+
+  def getBytes(self,bs):
+    data = bytes(bs)
+    return AES.encrypt(data)
+
+  def xor(self,data):
+    """XOR (encrypt) a block of data"""
+    data = bytearray(data)
+    stream = self.getBytes(len(data))
+    return bytearray(map(lambda b: b[0]^b[1],zip(data,stream)))
+
+def getBestCipherObject(key):
+  try:
+    from Crypto.Cipher import AES
+    return AES(key)
+  except ImportError:
+    return RC4(key)
+
 def make_hmacf(key):
   """Build a function for message signing"""
   return (lambda msg: make_hmacf_single_use(key)(msg))

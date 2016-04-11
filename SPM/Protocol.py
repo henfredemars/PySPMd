@@ -11,7 +11,7 @@ from SPM.Util import log, chunks, expandPath
 from SPM.Messages import MessageStrategy, MessageClass, MessageType
 from SPM.Messages import BadMessageError
 from SPM.Database import DatabaseError
-from SPM.Stream import RC4, make_hmacf
+from SPM.Stream import getBestCipherObject, make_hmacf
 from SPM.Status import Status
 
 strategies = MessageStrategy.strategies
@@ -124,7 +124,7 @@ class Protocol(asyncio.Protocol):
         if target_entry:
           key = hashlib.pbkdf2_hmac("sha1",target_entry.password.encode(
             "UTF-8",errors="ignore"),salt,_hash_rounds, dklen=256)
-          self.stream = RC4(key)
+          self.stream = getBestCipherObject(key)
           self.hmacf = make_hmacf(key)
           out_data = strategies[(MessageClass.PRIVATE_MSG,MessageType.CONFIRM_AUTH)].build([
             target_entry.subject],self.stream,self.hmacf)
