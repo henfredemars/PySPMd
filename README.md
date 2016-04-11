@@ -8,6 +8,7 @@ Python daemon and client library implementing a variant of the Schematic Protect
 
 # Technical Information
 * Encryption is performed using RC4-DROP-2048 with SHA1 authentication
+* Encryption performed with AES-256-CTR with SHA1 authentication if PyCrypto available
 * PCKS7 is used as the key dervation function from a shared secret password
 * Each connection uses a nonce, protecting the client information
 * Server authentication is performed by key derviation with shared secret
