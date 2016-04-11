@@ -6,7 +6,7 @@ import os
 from . import __version__, _msg_size, _hash_rounds, _data_size
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType, BadMessageError
-from SPM.Stream import RC4, make_hmacf
+from SPM.Stream import getBestCipherObject, make_hmacf
 from SPM.Tickets import Ticket, BadTicketError
 from SPM.Util import log
 
@@ -74,7 +74,7 @@ class Client():
     salt = os.urandom(32)
     self.key = hashlib.pbkdf2_hmac("sha1",password.encode("UTF-8"),salt,_hash_rounds,dklen=256)
     self.hmacf = make_hmacf(self.key)
-    self.stream = RC4(self.key)
+    self.stream = getBestCipherObject(self.key)
     self.subject = subject
     self.socket.sendall(strategies[(MessageClass.PUBLIC_MSG,MessageType.AUTH_SUBJECT)].build([subject,salt]))
     try:
