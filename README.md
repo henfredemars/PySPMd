@@ -13,6 +13,7 @@ Python daemon and client library implementing a variant of the Schematic Protect
 * Each connection uses a nonce, protecting the client information
 * Server authentication is performed by key derviation with shared secret
 * Async and fully non-blocking IO
+* This is a student project. Please do NOT rely on it for serious security
 
 # Notable Contents
 
