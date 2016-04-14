@@ -19,7 +19,7 @@ _file_size = 256
 _file_path_size = 1024
 _data_size = (_msg_size-(2+2+_hash_size))
 _error_msg_size = (_msg_size-(2+_hash_size))
-_hash_rounds = 2**4
+_hash_rounds = 2**14
 _debug = True
 _debug_width = 300
 
