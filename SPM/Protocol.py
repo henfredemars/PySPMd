@@ -5,7 +5,7 @@ import random
 import os
 
 from . import __version__, _msg_size, _hash_rounds, _data_size
-from . import _base_login_delay, _lss_count, _ls_count
+from . import _base_login_delay, _lss_count, _ls_count, _login_delay_spread
 from SPM.Util import log, chunks, expandPath
 
 from SPM.Messages import MessageStrategy, MessageClass, MessageType
@@ -118,7 +118,7 @@ class Protocol(asyncio.Protocol):
         await self.sendError("Missing target or salt")
         return
       #Resist timing attacks on the login process
-      await asyncio.sleep(_base_login_delay + random.random())
+      await asyncio.sleep(_base_login_delay + random.random()*_login_delay_spread)
       try:
         target_entry = db.getSubject(target)
         if target_entry:

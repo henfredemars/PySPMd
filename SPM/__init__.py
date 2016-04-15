@@ -9,6 +9,7 @@ _hash_size = 20
 _ticket_size = 3
 
 _base_login_delay = 3
+_login_delay_spread = 2
 _min_pass_len = 6
 _msg_size = 2048
 _subject_size = 64
